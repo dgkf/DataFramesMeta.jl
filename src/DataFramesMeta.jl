@@ -7,6 +7,10 @@ export @with, @where, @orderby, @transform, @by, @based_on, @select
 
 include("linqmacro.jl")
 include("byrow.jl")
+include("case_when.jl")
+include("col_pred.jl")
+include("transform_pred.jl")
+include("select2.jl")
 
 
 ##############################################################################

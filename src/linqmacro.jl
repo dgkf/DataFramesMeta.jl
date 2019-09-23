@@ -72,7 +72,7 @@ struct SymbolParameter{T} end
 SymbolParameter(s::Symbol) = SymbolParameter{s}()
 
 replacefuns(x) = x  # default for non-expression stuff
-function replacefuns(e::Expr)
+function replacefuns(e::Expr, context = nothing)
     for i in 1:length(e.args)
         e.args[i] = replacefuns(e.args[i])
     end
@@ -83,15 +83,21 @@ function replacefuns(e::Expr)
     end
 end
 
-replacechains(x) = x
-function replacechains(e::Expr)
+replacechains(x, context) = x
+function replacechains(e::Expr, context = nothing)
     for i in 1:length(e.args)
-        e.args[i] = replacechains(e.args[i])
+        e.args[i] = replacechains(e.args[i], context)
     end
+
     if e.head == :call && e.args[1] == :|> && isa(e.args[3], Expr)
         newe = e.args[3]
+        for (i, a) in enumerate(newe.args[2:end])
+            newe.args[i+1] = replacechains(newe.args[i+1], e.args[2])
+        end
         insert!(newe.args, 2, e.args[2])
         return newe
+    elseif context != nothing && e.head == :call && isa(e.args[1], Symbol)
+        return linq_context(SymbolParameter(e.args[1]), context, e.args[2:end]...)
     else
         return e
     end
@@ -133,4 +139,15 @@ end
 
 function linq(::SymbolParameter{:select}, x, args...)
     select_helper(x, args...)
+end
+
+function linq(::SymbolParameter{:transform_pred}, x, pred, args...)
+    transform_pred_helper(x, pred, args...)
+end
+
+## Default, no-context:
+linq_context(::SymbolParameter{s}, x, args...) where {s} = Expr(:call, s, args...)
+
+function linq_context(::SymbolParameter{:col_pred}, x, pred)
+    col_pred_helper(x, pred)
 end
