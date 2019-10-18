@@ -3,15 +3,22 @@ module DataFramesMeta
 using DataFrames, Tables
 
 # Basics:
-export @with, @where, @orderby, @transform, @by, @based_on, @select
+export @with, @where, @by, @based_on
+
+include("utils.jl")
+include("case_when.jl")
+include("column_selectors.jl")
+include("symbol_context.jl")
+
+include("transform.jl")
+include("select.jl") 
+include("filter.jl")
+include("orderby.jl")
+include("groupby.jl")
+include("aggregate.jl")
 
 include("linqmacro.jl")
 include("byrow.jl")
-include("case_when.jl")
-include("col_pred.jl")
-include("transform_pred.jl")
-include("select2.jl")
-
 
 ##############################################################################
 ##
@@ -41,9 +48,7 @@ replace_syms!(e::Expr, membernames) =
     elseif onearg(e, :cols)
         addkey!(membernames, :($(e.args[2])))
     elseif e.head == :quote
-        addkey!(membernames, Meta.quot(e.args[1]) )
-    elseif e.head == :.
-        replace_dotted!(e, membernames)
+        addkey!(membernames, Meta.quot(e.args[1]))
     else
         mapexpr(x -> replace_syms!(x, membernames), e)
     end
@@ -58,6 +63,8 @@ function protect_replace_syms!(e::Expr, membernames)
 end
 
 function replace_dotted!(e, membernames)
+    println(e.args[1])
+    println(e.args[2])
     x_new = replace_syms!(e.args[1], membernames)
     y_new = protect_replace_syms!(e.args[2], membernames)
     Expr(:., x_new, y_new)
@@ -171,7 +178,8 @@ julia> @with(df, :y + cols(colref)) # Equivalent to df[!, :y] + df[!, colref]
 `@with` creates a function, so scope within `@with` is a local scope.
 Variables in the parent can be read. Writing to variables in the parent scope
 differs depending on the type of scope of the parent. If the parent scope is a
-global scope, then a variable cannot be assigned without using the `global` keyword.
+global scope, then a variable cannot be assigned without using the `global` 
+keyword.
 If the parent scope is a local scope (inside a function or let block for example),
 the `global` keyword is not needed to assign to that parent scope.
 
@@ -288,7 +296,7 @@ end
 ##
 ##############################################################################
 
-select(d::AbstractDataFrame, arg) = d[!, arg]
+# select(d::AbstractDataFrame, arg) = d[!, arg]
 
 
 ##############################################################################
@@ -298,27 +306,27 @@ select(d::AbstractDataFrame, arg) = d[!, arg]
 ##############################################################################
 
 # needed on Julia 1.0 till #1489 in DataFrames is merged
-orderby(d::DataFrame, arg::DataFrame) = d[sortperm(arg), :]
-
-function orderby(d::AbstractDataFrame, args...)
-    D = typeof(d)(args...)
-    d[sortperm(D), :]
-end
-
-orderby(d::AbstractDataFrame, f::Function) = d[sortperm(f(d)), :]
-orderby(g::GroupedDataFrame, f::Function) = g[sortperm([f(x) for x in g])]
-
-orderbyconstructor(d::AbstractDataFrame) = (x...) -> DataFrame(Any[x...], Symbol.(1:length(x)))
-orderbyconstructor(d) = x -> x
-
-function orderby_helper(d, args...)
-    _D = gensym()
-    quote
-        let $_D = $d
-            $orderby($_D, $(with_anonymous(:($orderbyconstructor($_D)($(args...))))))
-        end
-    end
-end
+# orderby(d::DataFrame, arg::DataFrame) = d[sortperm(arg), :]
+# 
+# function orderby(d::AbstractDataFrame, args...)
+#     D = typeof(d)(args...)
+#     d[sortperm(D), :]
+# end
+# 
+# orderby(d::AbstractDataFrame, f::Function) = d[sortperm(f(d)), :]
+# orderby(g::GroupedDataFrame, f::Function) = g[sortperm([f(x) for x in g])]
+# 
+# orderbyconstructor(d::AbstractDataFrame) = (x...) -> DataFrame(Any[x...], Symbol.(1:length(x)))
+# orderbyconstructor(d) = x -> x
+# 
+# function orderby_helper(d, args...)
+#     _D = gensym()
+#     quote
+#         let $_D = $d
+#             $orderby($_D, $(with_anonymous(:($orderbyconstructor($_D)($(args...))))))
+#         end
+#     end
+# end
 
 """
     @orderby(d, i...)
@@ -365,10 +373,10 @@ Last Group:
 ```
 
 """
-macro orderby(d, args...)
-    # I don't esc just the input because I want _DF to be visible to the user
-    esc(orderby_helper(d, args...))
-end
+# macro orderby(d, args...)
+#     # I don't esc just the input because I want _DF to be visible to the user
+#     esc(orderby_helper(d, args...))
+# end
 
 
 ##############################################################################
@@ -377,143 +385,143 @@ end
 ##
 ##############################################################################
 
-function transform(d::AbstractDataFrame; kwargs...)
-    result = copy(d)
-    for (k, v) in kwargs
-        result[!, k] = isa(v, Function) ? v(d) : v
-    end
-    return result
-end
-
-function transform(g::GroupedDataFrame; kwargs...)
-    result = DataFrame(g)
-    ends = cumsum(Int[size(g[i],1) for i in 1:length(g)])
-    starts = [1; 1 .+ ends[1:end-1]]
-    lengths = [ends[i] - starts[i] + 1 for i in 1:length(starts)]
-    for (k, v) in kwargs
-        first = v(g[1])
-        if first isa AbstractVector
-            t = _transform!(Tables.allocatecolumn(eltype(first), size(result, 1)),
-                            first, 1, g, v, starts, ends)
-        else
-            t = _transform!(Tables.allocatecolumn(typeof(first), size(result, 1)),
-                            first, 1, g, v, starts, ends)
-        end
-        result[!, k] = t
-    end
-    return result
-end
-
-function _transform!(t::AbstractVector, first::AbstractVector, start::Int,
-                     g::GroupedDataFrame, v::Function, starts::Vector, ends::Vector)
-    @inline function fill_column!(t::AbstractVector, out, startpoint::Int, endpoint::Int,
-                                      len::Int)
-        if !(out isa AbstractVector)
-            throw(ArgumentError("Return value must be an `AbstractVector` for all groups or" *
-                                "for none of them"))
-        elseif length(out) != len
-            throw(ArgumentError("If a function returns a vector, the result " *
-                                "must have the same length as the groups it operates on"))
-        end
-        eltypout = eltype(out)
-        T = eltype(t)
-        if eltypout <: T || (newtype = promote_type(eltypout, T)) <: T
-           t[startpoint:endpoint] = out
-            return nothing
-        else
-            return newtype
-        end
-        return nothing
-    end
-
-    # handle the first case
-    newtype_first = fill_column!(t, first, starts[start], ends[start], size(g[start], 1))
-    @assert newtype_first === nothing
-    @inbounds for i in (start+1):length(g)
-        out = v(g[i])
-        newtype = fill_column!(t, out, starts[i], ends[i], size(g[i], 1))
-        if newtype !== nothing
-             t = copyto!(Tables.allocatecolumn(newtype, length(t)),
-                         1, t, 1, ends[i-1])
-             _transform!(t, out, i, g, v, starts, ends)
-         end
-    end
-    return t
-end
-
-function _transform!(t::AbstractVector, first::Any, start::Int,
-                     g::GroupedDataFrame, v::Function, starts::Vector, ends::Vector)
-    @inline function fill_column!(t::AbstractVector, out, startpoint::Int, endpoint::Int)
-        if out isa AbstractVector
-            throw(ArgumentError("Return value must be an `AbstractVector` for all groups or" *
-                                 "for none of them"))
-        end
-        typout = typeof(out)
-        T = eltype(t)
-        if typout <: T || (newtype = promote_type(typout, T)) <: T
-            t[startpoint:endpoint] .= Ref(out)
-            return nothing
-        else
-            return newtype
-        end
-    end
-    # handle the first case
-    newtype_first = fill_column!(t, first, starts[start], ends[start])
-    @assert newtype_first === nothing
-    @inbounds for i in (start+1):length(g)
-        out = v(g[i])
-        newtype = fill_column!(t, out, starts[i], ends[i])
-        if newtype !== nothing
-             t = copyto!(Tables.allocatecolumn(newtype, length(t)),
-                         1, t, 1, ends[i-1])
-             _transform!(t, out, i, g, v, starts, ends)
-         end
-    end
-    return t
-end
-
-function transform_helper(x, args...)
-    quote
-        $transform($x, $(map(args) do kw
-            Expr(:kw, kw.args[1], with_anonymous(kw.args[2]))
-        end...) )
-    end
-end
-
-"""
-    @transform(d, i...)
-
-Add additional columns or keys based on keyword arguments.
-
-### Arguments
-
-* `d` : an `AbstractDataFrame`, or `GroupedDataFrame`
-* `i...` : keyword arguments defining new columns or keys
-
-### Returns
-
-* `::AbstractDataFrame` or `::GroupedDataFrame`
-
-### Examples
-
-```jldoctest
-julia> using DataFramesMeta, DataFrames
-
-julia> df = DataFrame(A = 1:3, B = [2, 1, 2]);
-
-julia> @transform(df, a = 2 * :A, x = :A .+ :B)
-3×4 DataFrames.DataFrame
-│ Row │ A │ B │ a │ x │
-├─────┼───┼───┼───┼───┤
-│ 1   │ 1 │ 2 │ 2 │ 3 │
-│ 2   │ 2 │ 1 │ 4 │ 3 │
-│ 3   │ 3 │ 2 │ 6 │ 5 │
-```
-
-"""
-macro transform(x, args...)
-    esc(transform_helper(x, args...))
-end
+# function transform(d::AbstractDataFrame; kwargs...)
+#     result = copy(d)
+#     for (k, v) in kwargs
+#         result[!, k] = isa(v, Function) ? v(d) : v
+#     end
+#     return result
+# end
+# 
+# function transform(g::GroupedDataFrame; kwargs...)
+#     result = DataFrame(g)
+#     ends = cumsum(Int[size(g[i],1) for i in 1:length(g)])
+#     starts = [1; 1 .+ ends[1:end-1]]
+#     lengths = [ends[i] - starts[i] + 1 for i in 1:length(starts)]
+#     for (k, v) in kwargs
+#         first = v(g[1])
+#         if first isa AbstractVector
+#             t = _transform!(Tables.allocatecolumn(eltype(first), size(result, 1)),
+#                             first, 1, g, v, starts, ends)
+#         else
+#             t = _transform!(Tables.allocatecolumn(typeof(first), size(result, 1)),
+#                             first, 1, g, v, starts, ends)
+#         end
+#         result[!, k] = t
+#     end
+#     return result
+# end
+# 
+# function _transform!(t::AbstractVector, first::AbstractVector, start::Int,
+#                      g::GroupedDataFrame, v::Function, starts::Vector, ends::Vector)
+#     @inline function fill_column!(t::AbstractVector, out, startpoint::Int, endpoint::Int,
+#                                       len::Int)
+#         if !(out isa AbstractVector)
+#             throw(ArgumentError("Return value must be an `AbstractVector` for all groups or" *
+#                                 "for none of them"))
+#         elseif length(out) != len
+#             throw(ArgumentError("If a function returns a vector, the result " *
+#                                 "must have the same length as the groups it operates on"))
+#         end
+#         eltypout = eltype(out)
+#         T = eltype(t)
+#         if eltypout <: T || (newtype = promote_type(eltypout, T)) <: T
+#            t[startpoint:endpoint] = out
+#             return nothing
+#         else
+#             return newtype
+#         end
+#         return nothing
+#     end
+# 
+#     # handle the first case
+#     newtype_first = fill_column!(t, first, starts[start], ends[start], size(g[start], 1))
+#     @assert newtype_first === nothing
+#     @inbounds for i in (start+1):length(g)
+#         out = v(g[i])
+#         newtype = fill_column!(t, out, starts[i], ends[i], size(g[i], 1))
+#         if newtype !== nothing
+#              t = copyto!(Tables.allocatecolumn(newtype, length(t)),
+#                          1, t, 1, ends[i-1])
+#              _transform!(t, out, i, g, v, starts, ends)
+#          end
+#     end
+#     return t
+# end
+# 
+# function _transform!(t::AbstractVector, first::Any, start::Int,
+#                      g::GroupedDataFrame, v::Function, starts::Vector, ends::Vector)
+#     @inline function fill_column!(t::AbstractVector, out, startpoint::Int, endpoint::Int)
+#         if out isa AbstractVector
+#             throw(ArgumentError("Return value must be an `AbstractVector` for all groups or" *
+#                                  "for none of them"))
+#         end
+#         typout = typeof(out)
+#         T = eltype(t)
+#         if typout <: T || (newtype = promote_type(typout, T)) <: T
+#             t[startpoint:endpoint] .= Ref(out)
+#             return nothing
+#         else
+#             return newtype
+#         end
+#     end
+#     # handle the first case
+#     newtype_first = fill_column!(t, first, starts[start], ends[start])
+#     @assert newtype_first === nothing
+#     @inbounds for i in (start+1):length(g)
+#         out = v(g[i])
+#         newtype = fill_column!(t, out, starts[i], ends[i])
+#         if newtype !== nothing
+#              t = copyto!(Tables.allocatecolumn(newtype, length(t)),
+#                          1, t, 1, ends[i-1])
+#              _transform!(t, out, i, g, v, starts, ends)
+#          end
+#     end
+#     return t
+# end
+# 
+# function transform_helper(x, args...)
+#     quote
+#         $transform($x, $(map(args) do kw
+#             Expr(:kw, kw.args[1], with_anonymous(kw.args[2]))
+#         end...) )
+#     end
+# end
+# 
+# """
+#     @transform(d, i...)
+# 
+# Add additional columns or keys based on keyword arguments.
+# 
+# ### Arguments
+# 
+# * `d` : an `AbstractDataFrame`, or `GroupedDataFrame`
+# * `i...` : keyword arguments defining new columns or keys
+# 
+# ### Returns
+# 
+# * `::AbstractDataFrame` or `::GroupedDataFrame`
+# 
+# ### Examples
+# 
+# ```jldoctest
+# julia> using DataFramesMeta, DataFrames
+# 
+# julia> df = DataFrame(A = 1:3, B = [2, 1, 2]);
+# 
+# julia> @transform(df, a = 2 * :A, x = :A .+ :B)
+# 3×4 DataFrames.DataFrame
+# │ Row │ A │ B │ a │ x │
+# ├─────┼───┼───┼───┼───┤
+# │ 1   │ 1 │ 2 │ 2 │ 3 │
+# │ 2   │ 2 │ 1 │ 4 │ 3 │
+# │ 3   │ 3 │ 2 │ 6 │ 5 │
+# ```
+# 
+# """
+# macro transform(x, args...)
+#     esc(transform_helper(x, args...))
+# end
 
 
 ##############################################################################
@@ -679,13 +687,13 @@ end
 ##############################################################################
 
 
-function select(d::AbstractDataFrame; kwargs...)
-    result = typeof(d)()
-    for (k, v) in kwargs
-        result[!, k] = v
-    end
-    return result
-end
+# function select(d::AbstractDataFrame; kwargs...)
+#     result = typeof(d)()
+#     for (k, v) in kwargs
+#         result[!, k] = v
+#     end
+#     return result
+# end
 
 function replace_equals_with_kw(e)
     if e.head == :(=)
@@ -775,8 +783,8 @@ julia> @select(df, :c, x = :b + :c)
 │ 8   │ -0.460486 │ 0.539514  │
 ```
 """
-macro select(x, args...)
-    esc(select_helper(x, args...))
-end
+# macro select(x, args...)
+    # esc(select_helper(x, args...))
+# end
 
 end # module
