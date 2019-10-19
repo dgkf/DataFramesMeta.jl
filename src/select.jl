@@ -1,5 +1,7 @@
 export select, @select
 
+import DataFrames.select
+
 # Approach:
 # - Any valid select syntax is handled via `selector` dispatch
 # - Dispatch on first argument is used to return either a 
@@ -13,23 +15,36 @@ export select, @select
 # - integer values are +1 if column is to be selected, or -1 if column is to 
 #   be removed from selection
 
-# use multiple dispatch to determine whether function should be "curried"
-select(data::AnyDataFrame, args...) = select_(data, column_selectors(data, args))
+function select(f::Function, args...)
+    data -> select(f(data), args...)
+end
 
-# subsetting helpers
-select_(data::AnyDataFrame, cols) = data[!,cols]
+function select(data::AnyDataFrame, args...) 
+    select_(data, column_selectors(data, args))
+end
+
+
+
+function select_(data::AnyDataFrame, cols)
+    data[!,cols]
+end 
+
 function select_(data::GroupedDataFrame, cols)
     excluded_groupvars = setdiff(groupvars(data), names(data)[cols])
-    if (length(excluded_groupvars) > 0)
+    if length(excluded_groupvars) > 0
         @warn("Automatically adding grouping variable" * 
             (length(excluded_groupvars) > 1 ? "s " : " ") *
             spoken_list(excluded_groupvars, "'") * ". " *
             "To avoid warnings, add `groupvars` to selections.")
     end
-    colsyms = setdiff(names(data)[cols], groupvars(data))
-    map(df -> select_(df, colsyms), data)
+
+    groupsyms = groupvars(data)
+    colsyms = union(names(data)[cols], groupsyms)
+    groupby(parent(data)[!,colsyms], groupsyms)
 end
 
+
+
 macro select(args...)
-    esc(:(data -> $select(data, $(args...))))
+    esc(:(data -> $DataFramesMeta.select(data, $(args...))))
 end

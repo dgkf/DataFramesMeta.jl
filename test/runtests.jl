@@ -5,4 +5,3 @@ using DataFramesMeta
     dir = "tests"
     include.(dir .* "/" .* readdir(dir))
 end
-

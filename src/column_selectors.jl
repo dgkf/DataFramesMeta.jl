@@ -17,15 +17,17 @@ occursin(b::AbstractString) = df::AnyDataFrame -> occursin(df, b)
 occursin(data::Union{AbstractDataFrame,GroupedDataFrame}, b::AbstractString) = 
     occursin.(string.(names(data)), b)
 
-all() = true
+all() = df::AnyDataFrame -> convert(Array{Int8,1}, repeat([2], length(names(df))))
 
+(-)(y::Union{AbstractString,Array{AbstractString,1}}) = df::AnyDataFrame -> df - y
 (-)(y::Union{Symbol,Array{Symbol,1}}) = df::AnyDataFrame -> df - y
 (-)(f::Function) = df::AnyDataFrame -> -(f(df))
-(-)(data::Union{AbstractDataFrame,GroupedDataFrame}, y::Array{Symbol,1})::Array{Int8,1} = 
-    -in(y).(names(data))
-(-)(data::Union{AbstractDataFrame,GroupedDataFrame}, y::Array{T,1} where T<:AbstractString)::Array{Int8,1} = 
-    -in(y).(string.(names(data)))
-(-)(data::Union{AbstractDataFrame,GroupedDataFrame}, y::Symbol)::Array{Int8,1} =
+(-)(data::AnyDataFrame, y::Array{Symbol,1})::Array{Int8,1} = 
+    -in(y).(names(data)) .- 1
+function (-)(data::AnyDataFrame, y::Array{T,1} where T<:AbstractString)::Array{Int8,1}
+    -in(y).(string.(names(data))) .- 1
+end
+(-)(data::AnyDataFrame, y::Union{AbstractString,Symbol})::Array{Int8,1} =
     data - [y]
 
 (:)(a::Symbol, b::Symbol) = 
@@ -66,21 +68,30 @@ from a selection.
 
 ### Details
 
-`selector` is used to map many mechanisms of communicating column selection 
-down to a common masking array of -1 (remove) 0 (remove) or 1 (add). Selectors 
-are only [-1, 0] (for removal) or [0, 1] (for addition) and will always have 
-a length equal to the number of columns in the data source. These selection 
-masks can be sequentially applied using `selectors`, collapsing the `selector` 
-`Array{Int,1}` into a `Array{Bool,1}` mask of selected columns.
+`selector` is used to map many mechanisms of communicating column selection
+down to a common masking array of -1 (remove) 0 (remove) or 1 (add).
+Selectors are only [-2, -1, 0] (for removal) or [0, 1, 2] (for addition) and
+will always have a length equal to the number of columns in the data source.
+These selection masks can be sequentially applied using `selectors`,
+collapsing the `selector` `Array{Int,1}` into a `Array{Bool,1}` mask of
+selected columns.
+
+If the absolute value of a selector is 2, it will add (or remove) even if it's
+the only selector available, whereas if it is 1 it will assume an initial 
+complete or absent selection. As an example, we want `-all()` to remove all
+selections, whereas we want `-:x` to assume a complete selection prior to taking
+effect.
 
 Also works with any generic which can be partially evaluated to generate a 
 function: `startswith`, `endswith`, `occursin`, `everything`
 
 ```julia
 df = DataFrame(x = 1:26, y = 'a':'z', z = repeat([true, false], 13))
-DataFramesMeta.column_selector(df, :x)   # [ 1, 0, 0] 
-DataFramesMeta.column_selector(df, -:x)  # [-1, 0, 0] 
-DataFramesMeta.column_selector(df, 2:3)  # [ 0, 1, 1] 
+DataFramesMeta.column_selector(df, :x)      # [ 1, 0, 0] 
+DataFramesMeta.column_selector(df, -:x)     # [-1, 0, 0] 
+DataFramesMeta.column_selector(df, -all())  # [-2,-2,-2]
+DataFramesMeta.column_selector(df, -:a)     # [-1,-1,-1] 
+DataFramesMeta.column_selector(df, 2:3)     # [ 0, 1, 1] 
 ```
 
 ### Examples
@@ -122,7 +133,7 @@ column_selector(data::AbstractDataFrame, arg::Union{Tuple,Array})::Array{Int8,1}
     column_selectors(data, arg...)
     
 column_selector(data::AbstractDataFrame, arg::Bool)::Array{Int8,1} = 
-    repeat([arg ? 1 : -1], length(names(data)))
+    repeat([arg ? 2 : -2], length(names(data)))
 
 column_selector(data::AbstractDataFrame, arg::Integer)::Array{Int8,1} = 
     column_selector(data, [arg])
@@ -143,7 +154,7 @@ column_selector(data::AbstractDataFrame, arg::Regex)::Array{Int8,1} =
     match.(arg, string.(names(data))) .!= nothing
 
 column_selector(data::AbstractDataFrame, arg::Function)::Array{Int8,1} = 
-    column_selector(data, expecting_data(arg) ? arg(data) : arg.(eachcol(data)))
+    column_selector(data, accepts_data(arg) ? arg(data) : arg.(eachcol(data)))
 
 function column_selector(data::AbstractDataFrame, arg::Union{Array{Bool,1},BitArray{1}})::Array{Int8,1}
     @assert(length(arg) == length(names(data)),
@@ -157,7 +168,7 @@ function column_selector(data::AbstractDataFrame, arg::Array{T,1} where T<:Integ
         @assert(maximum(sign.(arg)) - minimum(sign.(arg)) <= 1,
             "column indices for selection should be either all negative or " *
             "all positive, but not both.")
-        all(arg .< 0) ? -in(-arg).(1:length(names(data))) : in(arg).(1:length(names(data)))
+        all(arg .< 0) ? -in(-arg).(1:length(names(data))) .- 1 : in(arg).(1:length(names(data)))
     else # column mask
         @assert(length(arg) == length(names(data)), 
             "column selection by Array{Int} must have length equal to the " *
@@ -191,7 +202,7 @@ ColumnSelector = Union{method_types(column_selector, [AbstractDataFrame], 2)...}
 
 
 """
-    selectors(data, args...)
+column_selectors(data, args...)
 
 `selectors` can be used to create an `Array{Bool,1}` selection mask with 
 length equal to the number of columns in `data` indicating whether to 
@@ -236,9 +247,9 @@ julia> using DataFrames, DataFramesMeta
 
 julia> df = DataFrame(x = 1:26, y = 'a':'z', z = repeat([true, false], 13));
 
-julia> selectors(df, :x, 3)
+julia> column_selectors(df, :x, 3)
 
-julia> selectors(df, [2, 3], -:z, r"x", -startswith("y"))
+julia> column_selectors(df, [2, 3], -:z, r"x", -startswith("y"))
 ```
 """
 column_selectors(args...) = 
@@ -260,18 +271,21 @@ function column_selectors(data::AnyDataFrame, s::Tuple)
         return(Array{Bool,1}[]) 
     end
 
-    selection = repeat([false], ncol_data)
+    selection = repeat([0], ncol_data)
     for (i, selector_i) in enumerate(s)
         # convert selection argument to column "predicate" array of (-1, 0, 1)
         # run twice, such that any user function which returns a type that 
         # can be handled gets converted to preferred output
         pred = column_selector(data, selector_i)
         
-        @assert(maximum(pred) - minimum(pred) <= 1 && maximum(abs.(pred)) <= 1,
+        @assert(maximum(sign.(pred)) - minimum(sign.(pred)) <= 1,
             "selectors must either add or remove selected columns, but cannot do both.")
 
         # handle case where 1st argument is removal (assume initial select all)
-        if (i == 1 && minimum(pred) == -1) selection .+= 1 end
+        if i == 1 && minimum(pred) < 0; selection .= 2
+        elseif maximum(abs.(pred)) > 1; pred = pred .-= sign.(pred)
+        end
+
         selection = min.(max.(selection .+ pred, 0), 1)
     end
     convert(Array{Bool,1}, selection)

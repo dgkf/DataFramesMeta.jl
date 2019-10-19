@@ -48,12 +48,12 @@ function symbol_context(expr::Expr, x::Symbol=gensym())
 end
 
 
-expecting_data(f, type::Type=AnyDataFrame) = false
-
-function expecting_data(f::Function, type::Type=AnyDataFrame)
-    startswith(string(nameof(f)), "#") && 
+accepts_data(f, type::Type=AnyDataFrame) = 
     any([m.sig<:Tuple{Any,T} where T<:type for m=methods(f)])
-end
+
+expecting_data(f, type::Type=AnyDataFrame) = false
+expecting_data(f::Function, type::Type=AnyDataFrame) = 
+    startswith(string(nameof(f)), "#") && accepts_data(f, type)
 
 function expecting_data(args...; kwargs...)
     [[expecting_data(a) for a=args]..., 

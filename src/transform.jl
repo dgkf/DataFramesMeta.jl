@@ -150,21 +150,35 @@ julia> df |> @transform(at => Number, x -> x .* 2)
 │ 3   │ 6     │ 'c'  │ 2     │
 ```
 """
-transform(data::AbstractDataFrame, predicate::Union{Pair,Nothing}=nothing,
-        x::Union{Function,Nothing}=nothing; kwargs...) =
+function transform(f::Function, args...; kwargs...)
+    data -> transform(f(data), args...; kwargs...)
+end
+
+function transform(data::AbstractDataFrame, 
+        predicate::Union{Pair,Nothing}=nothing, 
+        x::Union{Function,Nothing}=nothing; kwargs...)
     transform!(copy(data), predicate, x; kwargs...)
-transform(data::GroupedDataFrame, predicate::Union{Pair,Nothing}=nothing,
-        x::Union{Function,Nothing}=nothing; kwargs...) =
+end
+
+
+function transform(data::GroupedDataFrame, 
+        predicate::Union{Pair,Nothing}=nothing, 
+        x::Union{Function,Nothing}=nothing; kwargs...)
     groupby(transform!(copy(data.parent), predicate, x; kwargs...), data.cols)
-transform(data::DataFrames.DataFrameRows, predicate::Union{Pair,Nothing}=nothing,
-        x::Union{Function,Nothing}=nothing; kwargs...) =
+end
+
+function transform(data::DataFrames.DataFrameRows, 
+        predicate::Union{Pair,Nothing}=nothing,
+        x::Union{Function,Nothing}=nothing; kwargs...)
     transform!(eachrow(copy(parent(data))), predicate, x; kwargs...)
+end
 
 @doc (@doc transform) 
-transform!(data::AnyDataFrame, predicate::Union{Pair,Nothing}=nothing,
-        x::Union{Function,Nothing}=nothing; kwargs...) =
+function transform!(data::AnyDataFrame, 
+        predicate::Union{Pair,Nothing}=nothing,
+        x::Union{Function,Nothing}=nothing; kwargs...)
     transform_!(data, predicate, x; kwargs...)
-
+end
 
 """
 `transform_` operator, used by DataType-specific handlers
@@ -255,21 +269,21 @@ transform_handler!(g::GroupedDataFrame, col::Symbol, into::Symbol, x) =
 
 function transform_macro_helper(args...; inplace::Bool=false)
     a, kw = split_macro_args(args)
-    a, predicate, b = split_on_pair(a)
-    :($(inplace ? transform! : transform)(
+    predicate, a = match_args(a, [:(at => _)])
+    predicate = at_pair_to_symbol(predicate)
+    :(data -> $(inplace ? transform! : transform)(
         data, 
         $(predicate...),
         $(map(e -> symbol_context(e), a)...),
-        $(map(e -> symbol_context(e), b)...);
         $(map(e -> Expr(:kw, e.args[1], symbol_context(e.args[2])), kw)...)))
 end
 
 @doc (@doc transform) 
 macro transform(args...)
-    esc(:(data::$AnyDataFrame -> $(transform_macro_helper(args...))))
+    esc(transform_macro_helper(args...))
 end
 
 @doc (@doc transform) 
 macro transform!(args...)
-    esc(:(data::$AnyDataFrame -> $(transform_macro_helper(args...; inplace = true))))
+    esc(transform_macro_helper(args...; inplace = true))
 end

@@ -21,7 +21,7 @@ composes(f::Function, data) =
 currys(f::Function, data) = all([
     (add2 |> f |> mul2) isa Function, 
     (mul2 ∘ f ∘ add2) isa Function, 
-    !((add2 |> f |> mul2)(df) isa Function)])
+    !((add2 |> f |> mul2)(data) isa Function)])
 
 function composes_and_currys(verb, df)
     @testset "w/ `$(typeof(df))`" begin
@@ -41,23 +41,22 @@ end
 
 @testset "verb composition" begin
     @testset "select" begin
-        composes_and_currys(select2(1), df)
-        composes_and_currys(@select2(1), df)
-        composes_and_currys(select2(2), gdf)
-        composes_and_currys(@select2(2), gdf)
+        composes_and_currys(@select(1), df)
+        composes_and_currys(@select(2), gdf)
     end
 
     @testset "transform" begin
-        composes_and_currys(transform(a = 1), df)
         composes_and_currys(@transform(a = :x .* 2), df)
-        composes_and_currys(transform(a = 1), gdf)
         composes_and_currys(@transform(a = :x .* 2), gdf)
     end
 
     @testset "transform with predicate" begin
-        composes_and_currys(transform(:at => :x, x -> x .+ 1, a = 1), df)
         composes_and_currys(@transform(at => :x, a = :x .* 2), df)
-        composes_and_currys(transform(:at => :x, x -> x .+ 1, a = 1), gdf)
         composes_and_currys(@transform(at => :x, x -> x .+ 1, a = :x .* 2), gdf)
+    end
+
+    @testset "aggregate" begin
+        composes_and_currys(@aggregate(x = maximum(:x)), df)
+        composes_and_currys(@aggregate(x = maximum(:x)), gdf)
     end
 end

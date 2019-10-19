@@ -31,14 +31,14 @@ df = DataFrame(x = 1:26, y = 'a':'z', z = repeat([true, false], 13))
 
         @testset "Subtractive Symbol column names" begin
             @test typeof(DataFramesMeta.column_selectors(df, -:x))<:selector_output_type
-            @test DataFramesMeta.column_selectors(df, -:x) == [-1, 0, 0]
-            @test DataFramesMeta.column_selectors(df, -:a) == [0, 0, 0]
+            @test DataFramesMeta.column_selectors(df, -:x) == [0, 1, 1]
+            @test DataFramesMeta.column_selectors(df, -:a) == [1, 1, 1]
         end
 
         @testset "Bool column selection" begin
             @test typeof(DataFramesMeta.column_selectors(df, true))<:selector_output_type
             @test DataFramesMeta.column_selectors(df, true) == [1, 1, 1]
-            @test DataFramesMeta.column_selectors(df, false) == [-1, -1, -1]
+            @test DataFramesMeta.column_selectors(df, false) == [0, 0, 0]
         end
 
         @testset "Array{Bool} column selection" begin
@@ -53,7 +53,9 @@ df = DataFrame(x = 1:26, y = 'a':'z', z = repeat([true, false], 13))
             @test_throws AssertionError DataFramesMeta.column_selectors(df, [1, 0])
             @test DataFramesMeta.column_selectors(df, 1) == [1, 0, 0]
             @test DataFramesMeta.column_selectors(df, 2) == [0, 1, 0]
-            @test DataFramesMeta.column_selectors(df, -2) == [0, -1, 0]
+            @test DataFramesMeta.column_selectors(df, 5) == [0, 0, 0]
+            @test DataFramesMeta.column_selectors(df, -2) == [1, 0, 1]
+            @test DataFramesMeta.column_selectors(df, -5) == [1, 1, 1]
         end
 
         @testset "Selecting by column name range" begin
@@ -121,12 +123,13 @@ df = DataFrame(x = 1:26, y = 'a':'z', z = repeat([true, false], 13))
         @testset "all" begin
             @test typeof(DataFramesMeta.column_selectors(df, all()))<:selector_output_type
             @test DataFramesMeta.column_selectors(df, all()) == [1, 1, 1]
+            @test DataFramesMeta.column_selectors(df, -all()) == [0, 0, 0]
         end
     end
 
     @testset "Selectors function consolidates selector results" begin
-        @test typeof(column_selectors(df,))<:Array{Bool,1}
-        @test column_selectors(df, true, -:x, -2) == [false, false, true]
-        @test column_selectors(df, -:x, Bool, "y") == [false, true, true]
+        @test typeof(DataFramesMeta.column_selectors(df,))<:selector_output_type
+        @test DataFramesMeta.column_selectors(df, true, -:x, -2) == [0, 0, 1]
+        @test DataFramesMeta.column_selectors(df, -:x, Bool, "y") == [0, 1, 1]
     end
 end

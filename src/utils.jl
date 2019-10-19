@@ -41,7 +41,7 @@ match_arg(arg::Expr, pat::Expr) =
 
 
 function match_args(args, pattern)
-    length(args) == 0 && return repeat([()], length(pattern)+1)
+    length(args) == 0 && return (repeat([()], length(pattern)+1)..., 0)
     matches = repeat([0], length(args))
     pattern_l = length(pattern)
     pattern_i = 1
@@ -54,8 +54,9 @@ function match_args(args, pattern)
             pattern_i += 1
         end
     end
-
-    ((args[matches .== i] for i=[1:pattern_l...,0])..., pattern_l - length(pattern))
+    
+    matched = (args[matches .== i] for i=[1:pattern_l...,0])
+    (matched..., pattern_l - length(pattern))
 end
 
 function split_macro_args(args)
