@@ -1,42 +1,28 @@
-export column_selector, column_selectors
-import Base.startswith, Base.endswith, Base.occursin, Base.all, Base.(-), Base.(:)
-
-
-# extend some generics so that they can be partially evaluated to produce 
-# selector functions or valid selector inputs
-
-startswith(b::AbstractString) = df::AnyDataFrame -> startswith(df, b)
-startswith(data::Union{AbstractDataFrame,GroupedDataFrame}, b::AbstractString) = 
-    startswith.(string.(names(data)), b)
-
-endswith(b::AbstractString) = df::AnyDataFrame -> endswith(df, b)
-endswith(data::Union{AbstractDataFrame,GroupedDataFrame}, b::AbstractString) = 
-    endswith.(string.(names(data)), b)
-
-occursin(b::AbstractString) = df::AnyDataFrame -> occursin(df, b)
-occursin(data::Union{AbstractDataFrame,GroupedDataFrame}, b::AbstractString) = 
-    occursin.(string.(names(data)), b)
-
-all() = df::AnyDataFrame -> convert(Array{Int8,1}, repeat([2], length(names(df))))
-
-(-)(y::Union{AbstractString,Array{AbstractString,1}}) = df::AnyDataFrame -> df - y
-(-)(y::Union{Symbol,Array{Symbol,1}}) = df::AnyDataFrame -> df - y
-(-)(f::Function) = df::AnyDataFrame -> -(f(df))
-(-)(data::AnyDataFrame, y::Array{Symbol,1})::Array{Int8,1} = 
-    -in(y).(names(data)) .- 1
-function (-)(data::AnyDataFrame, y::Array{T,1} where T<:AbstractString)::Array{Int8,1}
-    -in(y).(string.(names(data))) .- 1
-end
-(-)(data::AnyDataFrame, y::Union{AbstractString,Symbol})::Array{Int8,1} =
-    data - [y]
-
-(:)(a::Symbol, b::Symbol) = 
-    df::AnyDataFrame -> findfirst(a .== names(df)):findlast(b .== names(df))
-
-
+export column_selector, cols
 
 protect_bool_array(x) = (x,)
 protect_bool_array(x::Union{Array{Bool,1},BitArray{1}}) = (x,)
+
+# Predicate DataTypes
+Pred = AbstractArray{Bool}
+PredPair = Pair{<:Union{Function,Pred},}
+
+
+
+struct ColumnPredicateFunction <: Function
+	f::Function
+end
+
+function (pred::ColumnPredicateFunction)(x) 
+	pred.f(x)
+end
+
+function (pred::ColumnPredicateFunction)(
+		x::GroupedDataFrame; 
+		incl_groups=true)
+	group_col_mask = (!in)(x.cols).(1:size(x.parent)[2])
+	col_mask = pred.f(x) .& (incl_groups .| group_col_mask)
+end
 
 
 
@@ -129,8 +115,11 @@ julia> DataFramesMeta.column_selector(df, (:x, 3))  # by Tuple or Array{Any,1}
 column_selector(data::AbstractDataFrame) = 
     column_selector(data, false)
 
+column_selector(data::AbstractDataFrame, arg::typeof(all))::Array{Int8,1} = 
+	convert(Array{Int8,1}, repeat([2], length(names(data))))
+
 column_selector(data::AbstractDataFrame, arg::Union{Tuple,Array})::Array{Int8,1} = 
-    column_selectors(data, arg...)
+    cols(data, arg...)
     
 column_selector(data::AbstractDataFrame, arg::Bool)::Array{Int8,1} = 
     repeat([arg ? 2 : -2], length(names(data)))
@@ -181,7 +170,7 @@ column_selector(data::ChildDataFrame, arg) =
     column_selector(parent(data), arg)
 
 column_selector(data::ChildDataFrame, arg::Union{Tuple,Array})::Array{Int8,1} = 
-    column_selectors(data, arg...)
+    cols(data, arg...)
 
 column_selector(data::ChildDataFrame, arg::Union{Array{Bool,1},BitArray{1},Array{T,1} where T<:Integer}) = 
     column_selector(parent(data), arg)
@@ -202,7 +191,7 @@ ColumnSelector = Union{method_types(column_selector, [AbstractDataFrame], 2)...}
 
 
 """
-column_selectors(data, args...)
+	cols(data, args...)
 
 `selectors` can be used to create an `Array{Bool,1}` selection mask with 
 length equal to the number of columns in `data` indicating whether to 
@@ -247,25 +236,30 @@ julia> using DataFrames, DataFramesMeta
 
 julia> df = DataFrame(x = 1:26, y = 'a':'z', z = repeat([true, false], 13));
 
-julia> column_selectors(df, :x, 3)
+julia> cols(df, :x, 3)
 
-julia> column_selectors(df, [2, 3], -:z, r"x", -startswith("y"))
+julia> cols(df, [2, 3], -:z, r"x", -startswith("y"))
 ```
 """
-column_selectors(args...) = 
-    column_selectors(args)
+cols(args...) = 
+    cols(args)
 
-column_selectors(s::Tuple) = 
-    data -> column_selectors(data, s)
+cols(s::Tuple) = 
+	ColumnPredicateFunction(data -> cols(data, s))
 
-column_selectors(data::AnyDataFrame, args...) = 
-    column_selectors(data, args)
+cols(data::AnyDataFrame, args...) = 
+    cols(data, args)
 
-column_selectors(data::AnyDataFrame, s) = 
-    column_selectors(data, (s,))
+cols(data::AnyDataFrame, f::Function) = 
+	cols(data, f(data))
 
-function column_selectors(data::AnyDataFrame, s::Tuple)
+cols(data::AnyDataFrame, f::typeof(all)) =
+	cols(data, (f,))
 
+cols(data::AnyDataFrame, s) = 
+    cols(data, (s,))
+
+function cols(data::AnyDataFrame, s::Tuple)
     ncol_data = length(names(data))
     if ncol_data < 1 
         return(Array{Bool,1}[]) 
@@ -290,3 +284,4 @@ function column_selectors(data::AnyDataFrame, s::Tuple)
     end
     convert(Array{Bool,1}, selection)
 end
+

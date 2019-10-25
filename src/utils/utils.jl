@@ -9,16 +9,46 @@ AnyDataFrame = Union{
     ChildDataFrame
  }
 
+
+
+"A default naming function for aggregation columns"
 default_naming_func(column_name, keyword) = column_name * "_" * keyword
+
+
+
+"""
+A simple wrapper to convert functions that operate on strings to operate on 
+Symbols
+"""
 sym_helper(f) = (args...) -> Symbol(f(string.(args)...))
 
-# helper for converting list to spoken sentence 
+
+
+"""
+    spoken_list(items, quoting_string="")
+
+Helper for converting list to spoken sentence 
+
+# Examples
+
+```
+julia> spoken_list(["a", "b", "c"])
+"a, b and c"
+```
+"""
 function spoken_list(list::AbstractArray, qchar::String="")
     s = string.(list)
     seps = reverse([i == 1 ? " and " : ", " for (i, si) in enumerate(s[2:end])])
     qchar * s[1] * qchar * string((seps .*  qchar .* s[2:end] .* qchar)...)
 end
 
+
+
+"""
+    match_arg(argument, pattern)
+
+Match an argument against a pattern, returning Bool indicating match
+"""
 match_arg(a, p) = p == :_
 match_arg(arg, pat::Union{Type,DataType}) = 
     match_arg(arg, pat, Val(pat))
@@ -37,9 +67,20 @@ match_arg(arg::QuoteNode, pat::Union{Symbol,QuoteNode}) =
 match_arg(arg::Symbol, pat::Symbol) = 
     pat == :_ || arg == pat
 match_arg(arg::Expr, pat::Expr) = 
-    arg.head == pat.head && length(arg.args) == length(pat.args) && all(match_arg.(arg.args, pat.args))
+    arg.head == pat.head && 
+    length(arg.args) == length(pat.args) && 
+    all(match_arg.(arg.args, pat.args))
 
 
+
+"""
+    match_args(args, patterns)
+
+Match a series of arguments against a series of argument patterns
+
+Patterns can either be Types or expressions. `_` is used as a wildcard for
+pattern matching.
+"""
 function match_args(args, pattern)
     length(args) == 0 && return (repeat([()], length(pattern)+1)..., 0)
     matches = repeat([0], length(args))
@@ -59,6 +100,9 @@ function match_args(args, pattern)
     (matched..., pattern_l - length(pattern))
 end
 
+
+
+"Split macro arguments into positional and keyword arguments"
 function split_macro_args(args)
     args = [a isa Expr && a.head == :parameters ? a.args : [a] for a in args]
     args = reduce(vcat, args)
@@ -66,10 +110,9 @@ function split_macro_args(args)
     args[(!).(has_kw)], args[has_kw]
 end
 
-function is_lambda(expr)
-    typeof(expr)<:Expr && expr.head == :->
-end
 
+
+"Convert a pair specified as `at => _` into `:at => _`"
 function at_pair_to_symbol(args)
     is_pair = [match_arg(arg, Pair) for arg in args]
     args = map(zip(args, is_pair)) do (arg, is_arg_pair)
@@ -77,6 +120,19 @@ function at_pair_to_symbol(args)
     end
 end
 
+
+
+"Convert a pair specified as `at => _` into `cols(_)`"
+function at_pair_to_cols(args)
+    is_pair = [match_arg(arg, Pair) for arg in args]
+    args = map(zip(args, is_pair)) do (arg, is_arg_pair)
+		is_arg_pair && arg.args[2] == :at ? Expr(:call, :cols, arg.args[3]) : arg
+    end
+end
+
+
+
+"Convert a QuoteNode to a Symbol in a Pair (`thing => _` becomes `:thing => _`)"
 function pair_name_to_symbol(pair_expr)
     if (!(typeof(pair_expr.args[2])<:QuoteNode))
         pair_expr.args[2] = Meta.quot(pair_expr.args[2])
@@ -84,13 +140,22 @@ function pair_name_to_symbol(pair_expr)
     pair_expr
 end
 
+
+
+"Split Pair arguments out from a list of arguments"
 function split_pairs(args)
     is_pair = [match_arg(arg, Pair) for arg in args]
     args[is_pair], args[(!).(is_pair)]
 end
 
+
+
+"""
+Split argument into arguments before the first pair, the first pair and 
+arguments after the first pair
+"""
 function split_on_pair(args)
-    is_pair = [is_pair_expr(arg) for arg in args]
+    is_pair = [match_arg(arg, Pair) for arg in args]
     args = map(zip(args, is_pair)) do (arg, is_arg_pair)
         is_arg_pair ? pair_name_to_symbol(arg) : arg
     end
@@ -105,39 +170,9 @@ function split_on_pair(args)
     end
 end
 
-function split_reserved(kwargs, re::Regex=r"^_")
-    is_res = map(kwargs) do kw
-        kw isa Expr && 
-        kw.head in (:kw, :(=)) && 
-        match(re, string(kw.args[1])) != nothing
-    end
-    kwargs[is_res], kwargs[(!).(is_res)]
-end
 
-function pairs_to_dict(pairs)
-    Expr(:Dict, pairs...)
-end
 
-function match_macro_args(args; formals::Array{Symbol,1})
-    has_kw = [a isa Expr && a.head in (:kw, :(=)) for a in args]    
-    kwargs = Dict(map(a -> a.args[1] => a.args[2], args[has_kw])...)
-    pargs = [args[(!).(has_kw)]...]
-
-    args = []
-    for (f, o) in zip(formals)
-        if (f in keys(kwargs)) 
-            append!(args, [f => pop!(kwargs, f)])
-        elseif (!o && length(pargs) > 0)
-            append!(args, [f => pargs[1]])
-            deleteat!(pargs, 1)
-        end
-    end
-
-    append!(args, pargs)
-    append!(args, kwargs)
-    args
-end
-
+"Get a list of types that are acceptable for a given generic"
 function method_types(f::Function, sig::AbstractArray, param::Number)
     [skipmissing(map(methods(f)) do m
         match_sig = all(a<:b for (a,b)=zip(m.sig.parameters[2:min(length(sig),end)], sig))
@@ -148,3 +183,9 @@ function method_types(f::Function, sig::AbstractArray, param::Number)
         end
     end)...]
 end
+
+
+"Replace single newline characters with a space."
+replace_single_newlines(str) = replace(replace(str,
+    r"([^\s\n])\n([^\s\n])" => s"\1 \2"), 
+    r"\n+$" => s"")

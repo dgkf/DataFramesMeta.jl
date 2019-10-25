@@ -1,5 +1,6 @@
 export case_when, case_when_with
 
+import Base.Broadcast.broadcasted
 
 """
     case_when(pred, x, rest...)
@@ -38,19 +39,21 @@ julia> case_when.(
     true, 3)
 ```
 """
-function case_when(case, x, rest...)
-    lr = length(rest)
-    if (length(rest) == 0) return ifelse(case, x, nothing) end
-    if (length(rest) == 1) return ifelse(case, x, rest...) end
-    ifelse(case, x, case_when(rest...))
+function case_when(cases...)
+	if length(cases) > 0
+		ifelse.(cases[1].first, cases[1].second, case_when(cases[2:end]...))
+	else
+		missing
+	end
 end
 
 
 
 cww_pred(v, pred::Function) = pred(v)
 cww_pred(v, pred::Type) = typeof(v)<:pred
-cww_pred(v, pred::Union{Bool}) = pred
+cww_pred(v, pred::AbstractArray{Bool}) = pred
 cww_pred(v, pred::Union{Array,Tuple}) = v in pred
+cww_pred(v, pred::Regex) = match.(pred, v) .!== nothing
 cww_pred(v, pred) = v == pred
 
 """
@@ -91,9 +94,13 @@ julia> case_when_with.(1:10,
                   6)  # optional fallthrough case, return `nothing` otherwise
 ```
 """
-function case_when_with(v, pred, x, rest...)
-    lr = length(rest)
-    if (lr == 0) return ifelse(cww_pred(v, pred), x, nothing) end
-    if (lr == 1) return ifelse(cww_pred(v, pred), x, rest...) end
-    ifelse(cww_pred(v, pred), x, case_when_with(v, rest...))
+function case_when_with(v, cases::Pair...)
+	if length(cases) > 0
+		ifelse.(
+			cww_pred.(v, cases[1].first), 
+			cases[1].second, case_when_with(v, cases[2:end]...))
+	else
+		missing
+	end
 end
+

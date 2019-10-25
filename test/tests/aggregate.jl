@@ -76,7 +76,7 @@ rdf = eachrow(df)
             names
         @test x == [:x_maximum, :y_maximum, :z_maximum]
 
-        # aggregate with predicate pairs (predicate => function) filters
+        # aggregate with predicate pairs (predicate => function) wheres
         # missing values from columns
         x = df |> 
             @aggregate(all() => maximum, Number => minimum) |>
@@ -92,13 +92,12 @@ rdf = eachrow(df)
             names
         @test x == [:test, :x, :y, :z]
 
-        # aggregate with predicate pairs (predicate => function) filters
+        # aggregate with predicate pairs (predicate => function) wheres
         # missing values from columns
         x = df |> 
             @aggregate(:test, all() => maximum) |>
             nrow
         @test x == 1
-
         # works with multiple predicate pairs
         x = df |> 
             @aggregate(:test, all() => maximum, Number => minimum) |>

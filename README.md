@@ -131,7 +131,7 @@ functions.
 
     Julia             dplyr            LINQ
     ---------------------------------------------
-    @where            filter           Where
+    @where            where           Where
     @transform        mutate           Select (?)
     @by                                GroupBy
     groupby           group_by
@@ -196,7 +196,7 @@ end
 The following operations are now included:
 
 - `where(g, d -> mean(d[:a]) > 0)` and `@where(g, mean(:a) > 0)` --
-  Filter groups based on the given criteria. Returns a
+  where groups based on the given criteria. Returns a
   GroupedDataFrame.
 
 - `orderby(g, d -> mean(d[:a]))` and `@orderby(g, mean(:a))` -- Sort

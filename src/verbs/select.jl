@@ -19,18 +19,23 @@ function select(f::Function, args...)
     data -> select(f(data), args...)
 end
 
+# overtly mask DataFrames.select method
+function select(data::DataFrame, arg::Function)
+    _select(data, cols(data, arg))
+end
+
 function select(data::AnyDataFrame, args...) 
-    select_(data, column_selectors(data, args))
+    _select(data, cols(data, args))
 end
 
 
 
-function select_(data::AnyDataFrame, cols)
-    data[!,cols]
+function _select(data::AnyDataFrame, col_mask)
+    data[!,col_mask]
 end 
 
-function select_(data::GroupedDataFrame, cols)
-    excluded_groupvars = setdiff(groupvars(data), names(data)[cols])
+function _select(data::GroupedDataFrame, col_mask)
+    excluded_groupvars = setdiff(groupvars(data), names(data)[col_mask])
     if length(excluded_groupvars) > 0
         @warn("Automatically adding grouping variable" * 
             (length(excluded_groupvars) > 1 ? "s " : " ") *
@@ -39,12 +44,13 @@ function select_(data::GroupedDataFrame, cols)
     end
 
     groupsyms = groupvars(data)
-    colsyms = union(names(data)[cols], groupsyms)
+    colsyms = union(names(data)[col_mask], groupsyms)
     groupby(parent(data)[!,colsyms], groupsyms)
 end
 
 
 
 macro select(args...)
-    esc(:(data -> $DataFramesMeta.select(data, $(args...))))
+	data = gensym()
+    esc(:($data -> DataFramesMeta.select($data, $(args...))))
 end

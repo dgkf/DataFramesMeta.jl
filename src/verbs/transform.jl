@@ -1,3 +1,4 @@
+
 export transform, transform!, @transform, @transform!
 
 
@@ -150,129 +151,141 @@ julia> df |> @transform(at => Number, x -> x .* 2)
 │ 3   │ 6     │ 'c'  │ 2     │
 ```
 """
-function transform(data::AbstractDataFrame, predicate::Union{Pair,Nothing}=nothing,
-        x::Union{Function,Nothing}=nothing; kwargs...)
-    result = copy(data)
-    transform!(result, predicate, x; kwargs...)
-    result
+function transform(f::Function, args...; kwargs...)
+    data -> transform(f(data), args...; kwargs...)
 end
-function transform(data::GroupedDataFrame, predicate::Union{Pair,Nothing}=nothing,
+
+function transform(data::AbstractDataFrame, 
+        predicate::Union{Pair,Nothing}=nothing, 
         x::Union{Function,Nothing}=nothing; kwargs...)
-    result = groupby(copy(data.parent), data.cols)
-    transform!(result, predicate, x; kwargs...)
-    result
+    transform!(copy(data), predicate, x; kwargs...)
 end
-transform(data::AnyDataFrame, predicate::Pair; kwargs...) = 
-    transform(data, predicate, nothing; kwargs...)
-transform(predicate::Pair, x::Union{Function,Nothing}=nothing; kwargs...) = 
-    data::Union{Function,AnyDataFrame} -> transform(data, predicate, x; kwargs...)
-transform(;kwargs...) = 
-    data::Union{Function,AnyDataFrame} -> transform(data, nothing, nothing; kwargs...)
-transform(f::Function, args...; kwargs...) = 
-    data::Union{Function,AnyDataFrame} -> transform(f(data), args...; kwargs...)
+
+
+function transform(data::GroupedDataFrame, 
+        predicate::Union{Pair,Nothing}=nothing, 
+        x::Union{Function,Nothing}=nothing; kwargs...)
+    groupby(transform!(copy(data.parent), predicate, x; kwargs...), data.cols)
+end
+
+function transform(data::DataFrames.DataFrameRows, 
+        predicate::Union{Pair,Nothing}=nothing,
+        x::Union{Function,Nothing}=nothing; kwargs...)
+    transform!(eachrow(copy(parent(data))), predicate, x; kwargs...)
+end
 
 @doc (@doc transform) 
-transform!(data::AnyDataFrame, predicate::Union{Pair,Nothing}=nothing,
-        x::Union{Function,Nothing}=nothing; kwargs...) = 
+function transform!(data::AnyDataFrame, 
+        predicate::Union{Pair,Nothing}=nothing,
+        x::Union{Function,Nothing}=nothing; kwargs...)
     transform_!(data, predicate, x; kwargs...)
-transform!(data::AnyDataFrame, predicate::Pair=(:at => true); kwargs...) = 
-    transform!(data, predicate, nothing; kwargs...)
-transform!(predicate::Pair, x::Union{Function,Nothing}=nothing; kwargs...) = 
-    data::Union{Function,AnyDataFrame} -> transform!(data, predicate, x; kwargs...)
-transform!(;kwargs...) = 
-    data::Union{Function,AnyDataFrame} -> transform!(data, nothing, nothing; kwargs...)
-transform!(f::Function, args...; kwargs...) = 
-    data::Union{Function,AnyDataFrame} -> transform!(f(data), args...; kwargs...)
-
-
+end
 
 """
 `transform_` operator, used by DataType-specific handlers
 """
-function transform_!(d::AbstractDataFrame, predicate::Pair, x; 
-        _namefunc::Union{Function,Nothing}=(col, kw)->col*"_"*kw, kwargs...)
+function transform_!(d::AnyDataFrame, predicate::Pair, x; 
+        _namefunc::Union{Function,Nothing}=default_naming_func, kwargs...)
 
     _namefunc = expecting_data(_namefunc) ? _namefunc(d) : _namefunc
-    cols = names(d)[column_selectors(d, predicate.second)]
-    dyn_cols = Symbol.(_namefunc(c,k) for c in string.(cols) for k in string.(keys(kwargs)))
+    col_syms = names(d)[cols(d, predicate.second)]
+    dyn_cols = Symbol.(_namefunc(c,k) for c in string.(col_syms) for k in string.(keys(kwargs)))
 
     @assert(!any(in(names(d)).(dyn_cols)), 
-        "New column names will overwrite existing columns")
+        "new column names will overwrite existing columns")
 
-    for col in cols
+    for col in col_syms
         for (k, v) in kwargs
+            # look into using DataFrames.insertcols!
             new_col = Symbol(_namefunc(string(col), string(k)))
             transform_handler!(d, col, new_col, v)
         end
+    end
+    for col in col_syms
         if (x !== nothing)
             transform_handler!(d, col, col, x)
         end
     end
+    d
 end
 
 function transform_!(g::GroupedDataFrame, predicate::Pair, x; 
-        _namefunc::Union{Function,Nothing}=(col, kw)->col*"_"*kw, kwargs...)
+        _namefunc::Union{Function,Nothing}=default_naming_func, kwargs...)
 
     _namefunc = expecting_data(_namefunc) ? _namefunc(g) : _namefunc
-    cols = names(g)[column_selectors(g, predicate.second)]
-    dyn_cols = Symbol.(_namefunc(c,k) for c in string.(cols) for k in string.(keys(kwargs)))
+   	col_syms = names(g)[cols(g, predicate.second)]
+    dyn_cols = Symbol.(_namefunc(c,k) for c in string.(col_syms) for k in string.(keys(kwargs)))
 
     @assert(!any(in(names(g)).(dyn_cols)), 
-        "New column names will overwrite existing columns")
+        "new column names will overwrite existing columns")
     
     @assert((x === nothing || !any(in(groupvars(g)).(cols))) && !any(in(groupvars(g)).(dyn_cols)),
         "transform is attempting to modify a grouping variable. " *
         "To affect grouping variables you must first ungroup.")
 
-    for col in cols
+    for col in col_syms
         for (k, v) in kwargs
+            # look into using DataFrames.insertcols!
             new_col = Symbol(_namefunc(string(col), string(k)))
             transform_handler!(g, col, new_col, v)
         end
+    end
+    for col in col_syms
         if (x !== nothing)
             transform_handler!(g, col, col, x)
         end
     end
+    g
 end
 
-transform_!(a::AnyDataFrame, predicate::Nothing, x::Nothing; kwargs...) =
+function transform_!(a::AnyDataFrame, predicate::Nothing, x::Nothing; kwargs...)
     for (k, v) in kwargs; transform_handler!(a, k, k, v); end
+    a
+end
 
 
 
-transform_handler(a::AbstractDataFrame, col::Symbol, into::Symbol, x) = [x]
-transform_handler(a::AbstractDataFrame, col::Symbol, into::Symbol, x::Array) = x
+transform_handler(a::AnyDataFrame, col::Symbol, into::Symbol, x) = x
 transform_handler(a::AbstractDataFrame, col::Symbol, into::Symbol, x::Function) =
     transform_handler(a, col, into, expecting_data(x) ? x(a) : x(a[!,col]))
-transform_handler!(a::AbstractDataFrame, col::Symbol, into::Symbol, x) =
-    a[!,into] .= x
-transform_handler!(a::AbstractDataFrame, col::Symbol, into::Symbol, x::Function) =
-    transform_handler!(a, col, into, expecting_data(x) ? x(a) : x(a[!,col]))
-function transform_handler!(g::GroupedDataFrame, col::Symbol, into::Symbol, x)
-    g.parent[!,into] = permute!(reduce(vcat, map(zip(g, g.starts, g.ends)) do (gi, s, e)
+transform_handler(a::DataFrames.DataFrameRows, col::Symbol, into::Symbol, x::Function) =
+    transform_handler(parent(a), col, into, expecting_data(x) ? x.(a) : x.(a[col]))
+function transform_handler(g::GroupedDataFrame, col::Symbol, into::Symbol, x)
+    permute!(reduce(vcat, map(zip(g, g.starts, g.ends)) do (gi, s, e)
         out = transform_handler(gi, col, into, x)
         length(out) == 1 ? repeat(out, e-s+1) : out
     end), g.idx)
 end
 
+transform_handler!(a::AbstractDataFrame, col::Symbol, into::Symbol, x) = 
+    a[!,into] .= x
+transform_handler!(a::AbstractDataFrame, col::Symbol, into::Symbol, x::Function) =
+    transform_handler!(a, col, into, expecting_data(x) ? x(a) : x(a[!,col]))
+transform_handler!(a::DataFrames.DataFrameRows, col, into, x::Function) =
+    transform_handler!(parent(a), col, into, expecting_data(x) ? x.(a) : x.(a[col]))
+transform_handler!(g::GroupedDataFrame, col::Symbol, into::Symbol, x) = 
+    g.parent[!,into] = transform_handler(g, col, into, x)
+
 
 
 function transform_macro_helper(args...; inplace::Bool=false)
     a, kw = split_macro_args(args)
-    data, predicate, x = split_on_pair(a)
-    :($(inplace ? transform! : transform)(
-        $(data...), 
+    predicate, a = match_args(a, [:(at => _)])
+    predicate = at_pair_to_symbol(predicate)
+    :(data -> $(inplace ? transform! : transform)(
+        data, 
         $(predicate...),
-        $(map(e -> symbol_context(e), x)...);
+        $(map(e -> symbol_context(e), a)...),
         $(map(e -> Expr(:kw, e.args[1], symbol_context(e.args[2])), kw)...)))
 end
 
 @doc (@doc transform) 
 macro transform(args...)
-    esc(:($(transform_macro_helper(args...))))
+    esc(transform_macro_helper(args...))
 end
 
 @doc (@doc transform) 
 macro transform!(args...)
-    esc(:($(transform_macro_helper(args...; inplace = true))))
+    esc(transform_macro_helper(args...; inplace = true))
 end
+

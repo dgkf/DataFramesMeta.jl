@@ -3,5 +3,5 @@ using DataFramesMeta
 
 @testset "DataFramesMeta" begin
     dir = "tests"
-    include.(dir .* "/" .* readdir(dir))
+	include.(filter(x -> endswith(x, ".jl"), joinpath.(dir, readdir(dir))))
 end
