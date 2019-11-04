@@ -2,7 +2,6 @@
 Expression operators
 """
 onearg(e, f) = e.head == :call && length(e.args) == 2 && e.args[1] == f
-mapexpr(f, e) = Expr(e.head, map(f, e.args)...)
 
 
 """
@@ -10,24 +9,25 @@ mapexpr(f, e) = Expr(e.head, map(f, e.args)...)
 
 Walk an AST for symbols and transform them with a given function.
 """
-walk_expr_for_syms(e, f) = e
+walk_expr_for_syms(e, f) = return e, false
 walk_expr_for_syms(q::QuoteNode, f) = walk_expr_for_syms(Meta.quot(q.value), f)
 walk_expr_for_syms(expr::Expr, symbol_dict::Dict) = 
     walk_expr_for_syms(expr, (e, s) -> get(symbol_dict, s, e))
 walk_expr_for_syms(expr::Expr, symbol_func::Function, symbols::Union{Array{Symbol,1}}) = 
     walk_expr_for_syms(expr, (e, s) -> s in symbols ? symbol_func(e, s) : expr)
 function walk_expr_for_syms(e::Expr, symbol_func::Function)
-    if onearg(e, :^)
-        e.args[2]
-    elseif onearg(e, :cols)
-        symbol_func(e, e.args[2].value)
+	if onearg(e, :^)
+        e.args[2], false
+	elseif e.head == :macrocall
+		e, false
     elseif e.args[1] == :(:.)
-        Expr(e.head, symbol_func(e, e.args[1].value), e.args[2:end]...)
+        Expr(e.head, symbol_func(e, e.args[1].value), e.args[2:end]...), true
     elseif e.head == :quote
-        symbol_func(e, e.args[1])
+		symbol_func(e, e.args[1]), true
     else
-        mapexpr(ei -> walk_expr_for_syms(ei, symbol_func), e)
-    end
+		walks = (walk_expr_for_syms(ei, symbol_func) for ei=e.args)
+		Expr(e.head, (w[1] for w=walks)...), any(w[2] for w=walks)
+	end
 end
 
 
@@ -86,9 +86,10 @@ function symbol_context(expr::Expr, x::Symbol=gensym())
     #     :x .* 3
     #   becomes
     #     d -> d:(:x) .* 3
-    :($x::$AnyDataFrame -> $(walk_expr_for_syms(expr, (
-        e, s) -> s == :. ? :($x) : :($x:$(Meta.quot(s))))
-    ))
+	new_expr, any_substitutions = walk_expr_for_syms(expr, 
+		(e, s) -> s == :. ? :($x) : :($x:$(Meta.quot(s))))
+
+	any_substitutions ? :($x::$AnyDataFrame -> $(new_expr)) : expr
 end
 
 
@@ -102,6 +103,8 @@ accepts_data(f, type::Type=AnyDataFrame) =
 Tests for whether a function is explicitly expecting a DataFrame-like object
 """
 expecting_data(f, type::Type=AnyDataFrame) = false
+expecting_data(f::ColumnPredicateFunction, type::Type=Any) = 
+	expecting_data(f.f, type)
 expecting_data(f::Function, type::Type=AnyDataFrame) = 
     startswith(string(nameof(f)), "#") && accepts_data(f, type)
 function expecting_data(args...; kwargs...)

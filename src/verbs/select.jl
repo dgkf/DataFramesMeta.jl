@@ -1,6 +1,6 @@
-export select, @select
+export select, select!, @select, @select!
 
-import DataFrames.select
+import DataFrames.select, DataFrames.select!
 
 # Approach:
 # - Any valid select syntax is handled via `selector` dispatch
@@ -15,26 +15,47 @@ import DataFrames.select
 # - integer values are +1 if column is to be selected, or -1 if column is to 
 #   be removed from selection
 
-function select(f::Function, args...)
-    data -> select(f(data), args...)
+function select(args...)
+    data -> select(data, args...)
+end
+
+function select!(args...)
+	data -> select!(data, args...)
 end
 
 # overtly mask DataFrames.select method
 function select(data::DataFrame, arg::Function)
-    _select(data, cols(data, arg))
+	data[!,cols(data, arg)]
+end
+
+function select!(data::DataFrame, arg::Function)
+	DataFrames.select!(data, cols(data, arg))
 end
 
 function select(data::AnyDataFrame, args...) 
-    _select(data, cols(data, args))
+	data[!,cols(data, args)]
+end
+
+function select!(data::AnyDataFrame, args...)
+	DataFrames.select!(data, cols(data, args))
+end
+
+function select(data::GroupedDataFrame, args...)
+	col_mask = validate_groupby_select_cols(data, cols(data, args))
+	groupby(select(parent(data), col_mask), groupvars(data))
+end
+
+function select!(data::GroupedDataFrame, args...)
+	col_mask = validate_groupby_select_cols(data, cols(data, args))
+	group_syms = groupvars(data)
+	DataFrames.select!(parent(data), col_mask)
+	data.cols .= (1:ncol(parent(data)))[in(group_syms).(names(data))]
+	data
 end
 
 
 
-function _select(data::AnyDataFrame, col_mask)
-    data[!,col_mask]
-end 
-
-function _select(data::GroupedDataFrame, col_mask)
+function validate_groupby_select_cols(data::GroupedDataFrame, col_mask)
     excluded_groupvars = setdiff(groupvars(data), names(data)[col_mask])
     if length(excluded_groupvars) > 0
         @warn("Automatically adding grouping variable" * 
@@ -42,15 +63,17 @@ function _select(data::GroupedDataFrame, col_mask)
             spoken_list(excluded_groupvars, "'") * ". " *
             "To avoid warnings, add `groupvars` to selections.")
     end
-
-    groupsyms = groupvars(data)
-    colsyms = union(names(data)[col_mask], groupsyms)
-    groupby(parent(data)[!,colsyms], groupsyms)
+	
+	col_mask[data.cols] .= true
+	col_mask 
 end
 
 
 
 macro select(args...)
-	data = gensym()
-    esc(:($data -> DataFramesMeta.select($data, $(args...))))
+	esc(:(select($(args...))))
+end
+
+macro select!(args...)
+	esc(:(select!($(args...))))
 end

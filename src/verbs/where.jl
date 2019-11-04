@@ -139,8 +139,8 @@ julia> df |> @where(
 │ 2   │ 4     │ 2     │ 'd'  │
 ```
 """
-function where(f::Function, args...; kwargs...)
-    data -> where(f(data), args...; kwargs...)
+function where(args...; kwargs...)
+    data -> where(data, args...; kwargs...)
 end
 
 function where(data::AnyDataFrame, args...; kwargs...)
@@ -155,8 +155,7 @@ function where(data::GroupedDataFrame, args...; kwargs...)
     groupby(where!(copy(parent(data)), args...; kwargs...), data.cols)
 end
 
-function where(data::GroupedDataFrame, predicate::Pair{Symbol,}, args...)
-	predicate = predicate.first => cols(data, predicate.second)
+function where(data::GroupedDataFrame, predicate::AnyColumnPredicate, args...)
 	groupby(where!(copy(parent(data)), predicate, args...), data.cols)
 end
 
@@ -184,11 +183,11 @@ deleterows!(d::DataFrames.DataFrameRows, x) = deleterows!(parent(d), x)
 names(d::DataFrames.DataFrameRows) = names(parent(d))
 
 function _where!(d::AnyDataFrame, args...)
-    _where!(d, [all() => (args...,)])
+	_where!(d, [cols(d, true) => (args...,)])
 end
 
-function _where!(d::AnyDataFrame, predicate::Pair{Symbol,}, args...)
-    _where!(d, [predicate.second => (args...,)])
+function _where!(d::AnyDataFrame, predicate::AnyColumnPredicate, args...)
+    _where!(d, [predicate => (args...,)])
 end
 
 function _where!(d::AnyDataFrame, predicate_pairs::PredPair...)
@@ -198,7 +197,7 @@ function _where!(d::AnyDataFrame, predicate_pairs::PredPair...)
     _where!(d, [predicate_pairs...])
 end
 
-function _where!(d::AnyDataFrame, predicate_pairs::Array{<:Pair})
+function _where!(d::AnyDataFrame, predicate_pairs::Array{<:ColumnPredicatedPair})
     i = (!).(reduce((l,r) -> l .& r, map(predicate_pairs) do (pred, arg)
         where_handler(d, cols(d, pred), arg)
     end))
@@ -211,74 +210,47 @@ end
 
 
 
-where_handler(d, cols, x) = x
-where_handler(d::DataFrames.DataFrameRows, cols, n::Nothing) = true
+where_handler(d, col_mask, x) = x
+where_handler(d::DataFrames.DataFrameRows, col_mask, n::Nothing) = true
 
-function where_handler(d, cols, f::Function)
-    if expecting_data(f); where_handler(d, cols, f(d[!,cols]))
-    else; where_handler(d, missing, mapcols(f, d[!,cols]))
+function where_handler(d, col_mask, f::Function)
+    if expecting_data(f); where_handler(d, col_mask, f(d[!,col_mask]))
+    else; where_handler(d, missing, mapcols(f, d[!,col_mask]))
     end
 end
 
-function where_handler(d::DataFrames.DataFrameRows, cols, 
+function where_handler(d::DataFrames.DataFrameRows, col_mask, 
         f::Function)
-	cell_results = (expecting_data(f) ? f(d) : f).([r[c] for r=d, c=1:length(cols)[cols]])
+	cell_results = (expecting_data(f) ? f(d) : f).([r[c] for r=d, c=col_mask])
     where_handler(d, cols, cell_results)
 end
 
-function where_handler(d, cols, t::Union{<:Tuple,<:NamedTuple})
-    all.((where_handler(d, cols, ti) for ti=t)...)
+function where_handler(d, col_mask, t::Union{<:Tuple,<:NamedTuple})
+    all.((where_handler(d, col_mask, ti) for ti=t)...)
 end
 
-function where_handler(d, cols::Missing, x::AnyDataFrame) 
+function where_handler(d, col_mask::Missing, x::AnyDataFrame) 
     @assert(all((<:).(typeof.(eachcol(x)), AbstractArray{Bool})), 
-        "all values of whereing function result must be a subtype of " *
+        "all values of where function result must be a subtype of " *
             "AbstractArray{Bool}")
     if ncol(x) == 0; return true; end
     reduce((l,r) -> l .& r, eachcol(x))
 end
 
-function where_handler(d, cols, x::AnyDataFrame)
+function where_handler(d, col_mask, x::AnyDataFrame)
     @assert(all((<:).(typeof.(eachcol(x)), AbstractArray{Bool})), 
-        "all values of whereing function result must be a subtype of " *
+        "all values of where function result must be a subtype of " *
             "AbstractArray{Bool}")
-    if isempty(eachcol(x[!,cols])); return true; end
-    reduce((l,r) -> l .& r, eachcol(x[!,cols]))
+    if isempty(eachcol(x[!,col_mask])); return true; end
+    reduce((l,r) -> l .& r, eachcol(x[!,col_mask]))
 end
 
 
-
-function where_macro_predicate_pairs_helper(f, a, kw)
-	data = gensym()
-    predicate_pairs, a = split_pairs(a)
-    :($data -> $f(
-        $data,
-        $(map(e -> symbol_context(e), a)...),
-        $(map(predicate_pairs) do e
-            Expr(:call, :(=>), 
-            Expr(:call, :cols, data, e.args[2]), symbol_context(e.args[3]))
-        end...),
-        $(map(e -> Expr(:kw, e.args[1], symbol_context(e.args[2])), kw)...)
-    ))
-end
-
-function where_macro_predicate_helper(f, predicate, a, kw)
-    predicate = at_pair_to_symbol(predicate)
-    :(data -> $(f)(
-        data,
-        $(predicate...),
-        $(map(symbol_context, a)...),
-        $(map(e -> Expr(:kw, e.args[1], symbol_context(e.args[2])), kw)...)))
-end
 
 function where_macro_helper(args...; inplace::Bool=false)
     f = inplace ? where! : where
-    a, kw = split_macro_args(args)
-    predicate, a, matched = match_args(a, [:(at => _)])
-
-    if matched == 0; where_macro_predicate_pairs_helper(f, a, kw)
-    else; where_macro_predicate_helper(f, predicate, a, kw)
-    end
+	args = verb_arg_handler(args, key=false)
+	:($f($(args...)))
 end
 
 @doc (@doc where) 

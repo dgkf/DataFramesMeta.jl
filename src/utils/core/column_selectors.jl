@@ -7,8 +7,6 @@ protect_bool_array(x::Union{Array{Bool,1},BitArray{1}}) = (x,)
 Pred = AbstractArray{Bool}
 PredPair = Pair{<:Union{Function,Pred},}
 
-
-
 struct ColumnPredicateFunction <: Function
 	f::Function
 end
@@ -19,11 +17,14 @@ end
 
 function (pred::ColumnPredicateFunction)(
 		x::GroupedDataFrame; 
-		incl_groups=true)
+		incl_groups::Bool=true)
 	group_col_mask = (!in)(x.cols).(1:size(x.parent)[2])
 	col_mask = pred.f(x) .& (incl_groups .| group_col_mask)
 end
 
+ColumnPredicateArray = AbstractArray{Bool}
+AnyColumnPredicate = Union{ColumnPredicateArray,ColumnPredicateFunction}
+ColumnPredicatedPair = Pair{<:AnyColumnPredicate,}
 
 
 """
@@ -244,19 +245,22 @@ julia> cols(df, [2, 3], -:z, r"x", -startswith("y"))
 cols(args...) = 
     cols(args)
 
-cols(s::Tuple) = 
-	ColumnPredicateFunction(data -> cols(data, s))
+cols(s::Tuple; kwargs...) = 
+	ColumnPredicateFunction(data::AnyDataFrame -> cols(data, s))
 
-cols(data::AnyDataFrame, args...) = 
+cols(data::AnyDataFrame, args...; kwargs...) = 
     cols(data, args)
 
-cols(data::AnyDataFrame, f::Function) = 
+cols(data::AnyDataFrame, f::Function; kwargs...) = 
 	cols(data, f(data))
 
-cols(data::AnyDataFrame, f::typeof(all)) =
+cols(data::AnyDataFrame, f::ColumnPredicateFunction; kwargs...) =
+	cols(data, f(data; kwargs...))
+
+cols(data::AnyDataFrame, f::typeof(all); kwargs...) =
 	cols(data, (f,))
 
-cols(data::AnyDataFrame, s) = 
+cols(data::AnyDataFrame, s; kwargs...) = 
     cols(data, (s,))
 
 function cols(data::AnyDataFrame, s::Tuple)

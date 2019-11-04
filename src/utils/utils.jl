@@ -126,7 +126,9 @@ end
 function at_pair_to_cols(args)
     is_pair = [match_arg(arg, Pair) for arg in args]
     args = map(zip(args, is_pair)) do (arg, is_arg_pair)
-		is_arg_pair && arg.args[2] == :at ? Expr(:call, :cols, arg.args[3]) : arg
+		is_arg_pair && arg.args[2] == :at ? 
+		Expr(:call, :(=>), :(:at), Expr(:call, :cols, arg.args[3])) : 
+		arg
     end
 end
 
@@ -138,6 +140,31 @@ function pair_name_to_symbol(pair_expr)
         pair_expr.args[2] = Meta.quot(pair_expr.args[2])
     end
     pair_expr
+end
+
+
+
+function verb_arg_handler(args; at_predicate=true, key=true, 
+			predicate_pairs=true, args_symbol_context=true, 
+			kwargs_symbol_context=true)
+	following_at_pred = true
+	map(enumerate(args)) do (i, arg)
+		if arg isa Expr && arg.head == :macrocall
+			return(arg)
+		elseif at_predicate && match_arg(arg, :(at => _))
+			following_at_pred = true
+			return(Expr(:call, :cols, arg.args[3]))
+		elseif predicate_pairs && match_arg(arg, :(_ => _))
+			arg.args[2] = Expr(:call, :cols, arg.args[2])
+		elseif key && following_at_pred && match_arg(arg, Symbol)
+		elseif kwargs_symbol_context && arg isa Expr && arg.head in (:kw, :(=))
+			arg = Expr(:kw, arg.args[1], symbol_context(arg.args[2]))
+		elseif args_symbol_context
+        	arg = symbol_context(arg)
+		end
+		following_at_pred = false
+		arg
+	end
 end
 
 
