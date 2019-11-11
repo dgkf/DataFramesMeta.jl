@@ -252,7 +252,7 @@ cols(data::AnyDataFrame, args...; kwargs...) =
     cols(data, args)
 
 cols(data::AnyDataFrame, f::Function; kwargs...) = 
-	cols(data, f(data))
+	cols(data, column_selector(data, f))
 
 cols(data::AnyDataFrame, f::ColumnPredicateFunction; kwargs...) =
 	cols(data, f(data; kwargs...))

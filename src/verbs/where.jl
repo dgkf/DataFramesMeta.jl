@@ -138,9 +138,24 @@ julia> df |> @where(
 │ 1   │ 2     │ 2     │ 'b'  │
 │ 2   │ 4     │ 2     │ 'd'  │
 ```
+
+Specifying multiple predicates via a columnwise aggregation function
+
+```jdoctest
+julia> df |> @where(all(
+		any(Number, x -> iseven.(x)),
+		Char => x -> 'd' .>= x .>= 'b'
+	))
+2×3 DataFrame
+│ Row │ x     │ y     │ z    │
+│     │ Int64 │ Int64 │ Char │
+├─────┼───────┼───────┼──────┤
+│ 1   │ 2     │ 2     │ 'b'  │
+│ 2   │ 4     │ 2     │ 'd'  │
+```
 """
 function where(args...; kwargs...)
-    data -> where(data, args...; kwargs...)
+    partial_verb(where, args...; kwargs...)
 end
 
 function where(data::AnyDataFrame, args...; kwargs...)
@@ -164,8 +179,8 @@ function where(data::DataFrames.DataFrameRows, args...; kwargs...)
 end
 
 @doc (@doc where) 
-function where!(f::Function, args...; kwargs...)
-    data -> where!(f(data), args...; kwargs...)
+function where!(args...; kwargs...)
+    partial_verb(where!, args...; kwargs...)
 end
 
 function where!(data::AnyDataFrame, args...; kwargs...)
@@ -191,9 +206,6 @@ function _where!(d::AnyDataFrame, predicate::AnyColumnPredicate, args...)
 end
 
 function _where!(d::AnyDataFrame, predicate_pairs::PredPair...)
-    predicate_pairs = map(predicate_pairs) do (k,v)
-        k => expecting_data(v) ? v(d) : v
-    end
     _where!(d, [predicate_pairs...])
 end
 

@@ -151,7 +151,7 @@ julia> df |> @transform(at => Number, x -> x .* 2)
 ```
 """
 function transform(args...; kwargs...)
-    data -> transform(data, args...; kwargs...)
+	partial_verb(transform, args...; kwargs...)
 end
 
 function transform(data::AbstractDataFrame, args...; kwargs...)
@@ -169,6 +169,10 @@ end
 
 
 @doc (@doc transform) 
+function transform!(args...; kwargs...)
+	partial_verb(transform!, args...; kwargs...)
+end
+
 function transform!(data::AnyDataFrame, predicate::AnyColumnPredicate,
         x::Function; kwargs...)
     transform_!(data, predicate, x; kwargs...)

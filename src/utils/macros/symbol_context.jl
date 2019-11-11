@@ -35,13 +35,16 @@ end
 Define a new DataFrame operator which can be used to get DataFramesMeta-relevant
 column data from multiple DataFrame-like Types
 """
-(::Colon)(d::AnyDataFrame, s::Symbol) = try_accessor(d, s)
+(d::DataFrame)(x) = try_accessor(d, x)
+(d::GroupedDataFrame)(x) = try_accessor(d, x)
+(d::DataFrameRow)(x) = try_accessor(d, x)
 
 """
 Try to get Symbol from DataFrame context, returning Symbol if not relevant in 
 current context
 """
 try_accessor(d, s::Symbol) = s in names(d) ? accessor(d,s) : s
+try_accessor(d, x) = accessor(d, x)
 
 """
 Type-dispatched accessors for DataFrame-like Types
@@ -87,7 +90,7 @@ function symbol_context(expr::Expr, x::Symbol=gensym())
     #   becomes
     #     d -> d:(:x) .* 3
 	new_expr, any_substitutions = walk_expr_for_syms(expr, 
-		(e, s) -> s == :. ? :($x) : :($x:$(Meta.quot(s))))
+		(e, s) -> s == :. ? :($x) : :($x($(Meta.quot(s)))))
 
 	any_substitutions ? :($x::$AnyDataFrame -> $(new_expr)) : expr
 end

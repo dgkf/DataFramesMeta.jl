@@ -2,12 +2,12 @@ export orderby, orderby!, @orderby, @orderby!
 
 
 
-orderby(args...; kwargs...) = data -> orderby(data, args...; kwargs...)
+orderby(args...; kwargs...) = partial_verb(orderby, args...; kwargs...)
 orderby(data::AnyDataFrame, args...) = orderby_!(copy(data), args...)
 orderby(g::GroupedDataFrame, args...) =
     groupby(orderby_!(copy(parent(g)), args...), g.cols)
 
-orderby!(args...; kwargs...) = data -> orderby!(data, args...; kwargs...)
+orderby!(args...; kwargs...) = partial_verb(orderby!, args...; kwargs...)
 orderby!(data::AnyDataFrame, args...) = orderby_!(data::AnyDataFrame, args...)
 orderby!(g::GroupedDataFrame, args...) =
     groupby(orderby_!(parent(g), args...), g.cols)

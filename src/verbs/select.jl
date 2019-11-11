@@ -16,11 +16,11 @@ import DataFrames.select, DataFrames.select!
 #   be removed from selection
 
 function select(args...)
-    data -> select(data, args...)
+	partial_verb(select, args...)
 end
 
 function select!(args...)
-	data -> select!(data, args...)
+	partial_verb(select!, args...)
 end
 
 # overtly mask DataFrames.select method
@@ -30,6 +30,16 @@ end
 
 function select!(data::DataFrame, arg::Function)
 	DataFrames.select!(data, cols(data, arg))
+end
+
+# overtly handle ColumnPredicateFunction as first arg so it doesn't get
+# mistreated as a data frame transformation function
+function select(cpf::ColumnPredicateFunction, args...)
+	partial_verb(select, cpf, args...)
+end
+
+function select!(cpf::ColumnPredicateFunction, args...)
+	partial_verb(select!, cpf, args...)
 end
 
 function select(data::AnyDataFrame, args...) 
