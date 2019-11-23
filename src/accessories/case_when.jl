@@ -50,7 +50,8 @@ end
 
 
 cww_pred(v, pred::Function) = pred(v)
-cww_pred(v, pred::Type) = typeof(v)<:pred
+cww_pred(v, pred::Type) = (<:).(typeof(v), pred)
+cww_pred(v, pred::Bool) = pred
 cww_pred(v, pred::AbstractArray{Bool}) = pred
 cww_pred(v, pred::Union{Array,Tuple}) = v in pred
 cww_pred(v, pred::Regex) = match.(pred, v) .!== nothing
@@ -81,17 +82,17 @@ upon the initial value, `v`
 ```jldoctest
 julia> using DataFramesMeta
 
-julia> case_when_with('a', ==('b'), 1, 2)
+julia> case_when_with('a', ==('b') => 1, true => 2)
 
-julia> case_when_with('a', 'a', 1, 2)
+julia> case_when_with('a', 'a' => 1, true => 2)
 
-julia> case_when_with.(1:10,
-    x -> x .< 3,  1,  # handle lambdas
-    1:10 .< 5,    2,  # handle boolean arrays
-    [(3, 6, 7)],  3,  # handle "in" for arrays, tuples
-    9,            4,  # handle single values
-    Int64,        5,  # handle DataTypes 
-                  6)  # optional fallthrough case, return `nothing` otherwise
+julia> case_when_with(1:10,
+	(x -> x .< 3) =>  1,  # handle lambdas
+    1:10 .< 5     =>  2,  # handle boolean arrays
+    [(3, 6, 7)]   =>  3,  # handle iterables with "in". Wrapped for broadcasting.
+    9             =>  4,  # handle single values
+    Int64         =>  5,  # handle DataTypes 
+    true          =>  6)  # optional fallthrough case, return `nothing` otherwise
 ```
 """
 function case_when_with(v, cases::Pair...)
