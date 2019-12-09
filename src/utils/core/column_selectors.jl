@@ -16,7 +16,7 @@ function (pred::ColumnPredicateFunction)(
         x::GroupedDataFrame; 
         incl_groups::Bool=true)
     group_col_mask = (!in)(x.cols).(1:size(x.parent)[2])
-    col_mask = pred.f(x) .& (incl_groups .| group_col_mask)
+    col_mask = pred.f(x).mask .& (incl_groups .| group_col_mask)
 end
 
 struct ColumnMask{T<:Bool} <: AbstractArray{T,1}

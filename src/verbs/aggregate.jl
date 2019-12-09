@@ -339,7 +339,7 @@ end
 
 function aggregate(g::GroupedDataFrame, predicate::AnyColumnPredicate, 
 		args...; kwargs...)
-    col_mask = cols(g, predicate.second)
+    col_mask = cols(g, predicate)
     map(g) do gi; aggregate(gi, col_mask, args...; kwargs...); end
 end
 
