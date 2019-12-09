@@ -8,6 +8,9 @@ onearg(e, f) = e.head == :call && length(e.args) == 2 && e.args[1] == f
     walk_expr_for_syms(expression, symbol_modification_function)
 
 Walk an AST for symbols and transform them with a given function.
+
+Returns a tuple of a new expression and a boolean indicating whether symbols
+were replaced in the expression.
 """
 walk_expr_for_syms(e, f) = return e, false
 walk_expr_for_syms(q::QuoteNode, f) = walk_expr_for_syms(Meta.quot(q.value), f)
@@ -16,18 +19,20 @@ walk_expr_for_syms(expr::Expr, symbol_dict::Dict) =
 walk_expr_for_syms(expr::Expr, symbol_func::Function, symbols::Union{Array{Symbol,1}}) = 
     walk_expr_for_syms(expr, (e, s) -> s in symbols ? symbol_func(e, s) : expr)
 function walk_expr_for_syms(e::Expr, symbol_func::Function)
-	if onearg(e, :^)
+    if onearg(e, :^)
         e.args[2], false
-	elseif e.head == :macrocall
-		e, false
+    elseif e.head == :macrocall
+	e, false
+    elseif e.head == :. && e.args[2] isa QuoteNode
+        e, false
     elseif e.args[1] == :(:.)
         Expr(e.head, symbol_func(e, e.args[1].value), e.args[2:end]...), true
     elseif e.head == :quote
-		symbol_func(e, e.args[1]), true
+        symbol_func(e, e.args[1]), true
     else
-		walks = (walk_expr_for_syms(ei, symbol_func) for ei=e.args)
-		Expr(e.head, (w[1] for w=walks)...), any(w[2] for w=walks)
-	end
+	walks = (walk_expr_for_syms(ei, symbol_func) for ei=e.args)
+	Expr(e.head, (w[1] for w=walks)...), any(w[2] for w=walks)
+    end
 end
 
 
@@ -89,10 +94,10 @@ function symbol_context(expr::Expr, x::Symbol=gensym())
     #     :x .* 3
     #   becomes
     #     d -> d:(:x) .* 3
-	new_expr, any_substitutions = walk_expr_for_syms(expr, 
-		(e, s) -> s == :. ? :($x) : :($x($(Meta.quot(s)))))
-
-	any_substitutions ? :($x::$AnyDataFrame -> $(new_expr)) : expr
+    new_expr, any_substitutions = walk_expr_for_syms(expr, 
+        (e, s) -> s == :. ? :($x) : :($x($(Meta.quot(s)))))
+    
+    any_substitutions ? :($x::$AnyDataFrame -> $(new_expr)) : expr
 end
 
 

@@ -154,10 +154,6 @@ julia> df |> @where(all(
 │ 2   │ 4     │ 2     │ 'd'  │
 ```
 """
-function where(args...; kwargs...)
-    partial_verb(where, args...; kwargs...)
-end
-
 function where(data::AnyDataFrame, args...; kwargs...)
     _where!(copy(data), args...; kwargs...)
 end
@@ -179,10 +175,6 @@ function where(data::DataFrames.DataFrameRows, args...; kwargs...)
 end
 
 @doc (@doc where) 
-function where!(args...; kwargs...)
-    partial_verb(where!, args...; kwargs...)
-end
-
 function where!(data::AnyDataFrame, args...; kwargs...)
     _where!(data, args...; kwargs...)
 end
@@ -198,20 +190,16 @@ deleterows!(d::DataFrames.DataFrameRows, x) = deleterows!(parent(d), x)
 names(d::DataFrames.DataFrameRows) = names(parent(d))
 
 function _where!(d::AnyDataFrame, args...)
-	_where!(d, [cols(d, true) => (args...,)])
+    _where!(d, [cols(d, true) => (args...,)])
 end
 
 function _where!(d::AnyDataFrame, predicate::AnyColumnPredicate, args...)
     _where!(d, [predicate => (args...,)])
 end
 
-function _where!(d::AnyDataFrame, predicate_pairs::PredPair...)
-    _where!(d, [predicate_pairs...])
-end
-
 function _where!(d::AnyDataFrame, predicate_pairs::Array{<:ColumnPredicatedPair})
     i = (!).(reduce((l,r) -> l .& r, map(predicate_pairs) do (pred, arg)
-        where_handler(d, cols(d, pred), arg)
+        where_handler(d, colmask(d, pred), arg)
     end))
 
     if length(i) == 1 (if i[1] deleterows!(d, 1:nrow(d)) end)
@@ -234,7 +222,7 @@ end
 function where_handler(d::DataFrames.DataFrameRows, col_mask, 
         f::Function)
 	cell_results = (expecting_data(f) ? f(d) : f).([r[c] for r=d, c=col_mask])
-    where_handler(d, cols, cell_results)
+    where_handler(d, col_mask, cell_results)
 end
 
 function where_handler(d, col_mask, t::Union{<:Tuple,<:NamedTuple})
@@ -244,7 +232,7 @@ end
 function where_handler(d, col_mask::Missing, x::AnyDataFrame) 
     @assert(all((<:).(typeof.(eachcol(x)), AbstractArray{Bool})), 
         "all values of where function result must be a subtype of " *
-            "AbstractArray{Bool}")
+        "AbstractArray{Bool}")
     if ncol(x) == 0; return true; end
     reduce((l,r) -> l .& r, eachcol(x))
 end
@@ -252,7 +240,7 @@ end
 function where_handler(d, col_mask, x::AnyDataFrame)
     @assert(all((<:).(typeof.(eachcol(x)), AbstractArray{Bool})), 
         "all values of where function result must be a subtype of " *
-            "AbstractArray{Bool}")
+        "AbstractArray{Bool}")
     if isempty(eachcol(x[!,col_mask])); return true; end
     reduce((l,r) -> l .& r, eachcol(x[!,col_mask]))
 end
@@ -260,9 +248,9 @@ end
 
 
 function where_macro_helper(args...; inplace::Bool=false)
-    f = inplace ? where! : where
-	args = verb_arg_handler(args, key=false)
-	:($f($(args...)))
+    f = inplace ? gen(where!) : gen(where)
+        args = verb_arg_handler(args, key=false)
+        :($f($(args...)))
 end
 
 @doc (@doc where) 

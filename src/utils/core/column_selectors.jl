@@ -4,26 +4,26 @@ protect_bool_array(x) = (x,)
 protect_bool_array(x::Union{Array{Bool,1},BitArray{1}}) = (x,)
 
 # Predicate DataTypes
-Pred = AbstractArray{Bool}
-PredPair = Pair{<:Union{Function,Pred},}
-
 struct ColumnPredicateFunction <: Function
-	f::Function
+    f::Function
 end
 
 function (pred::ColumnPredicateFunction)(x) 
-	pred.f(x)
+    pred.f(x)
 end
 
 function (pred::ColumnPredicateFunction)(
-		x::GroupedDataFrame; 
-		incl_groups::Bool=true)
-	group_col_mask = (!in)(x.cols).(1:size(x.parent)[2])
-	col_mask = pred.f(x) .& (incl_groups .| group_col_mask)
+        x::GroupedDataFrame; 
+        incl_groups::Bool=true)
+    group_col_mask = (!in)(x.cols).(1:size(x.parent)[2])
+    col_mask = pred.f(x) .& (incl_groups .| group_col_mask)
 end
 
-ColumnPredicateArray = AbstractArray{Bool}
-AnyColumnPredicate = Union{ColumnPredicateArray,ColumnPredicateFunction}
+struct ColumnMask{T<:Bool} <: AbstractArray{T,1}
+    mask::AbstractArray{T,1}
+end
+
+AnyColumnPredicate = Union{ColumnMask,ColumnPredicateFunction}
 ColumnPredicatedPair = Pair{<:AnyColumnPredicate,}
 
 
@@ -116,11 +116,14 @@ julia> DataFramesMeta.column_selector(df, (:x, 3))  # by Tuple or Array{Any,1}
 column_selector(data::AbstractDataFrame) = 
     column_selector(data, false)
 
+column_selector(data::AbstractDataFrame, arg::ColumnMask) = 
+    column_selector(data, arg.mask)
+
 column_selector(data::AbstractDataFrame, arg::typeof(all))::Array{Int8,1} = 
-	convert(Array{Int8,1}, repeat([2], length(names(data))))
+    convert(Array{Int8,1}, repeat([2], length(names(data))))
 
 column_selector(data::AbstractDataFrame, arg::Union{Tuple,Array})::Array{Int8,1} = 
-    cols(data, arg...)
+    colmask(data, arg...)
     
 column_selector(data::AbstractDataFrame, arg::Bool)::Array{Int8,1} = 
     repeat([arg ? 2 : -2], length(names(data)))
@@ -171,7 +174,7 @@ column_selector(data::ChildDataFrame, arg) =
     column_selector(parent(data), arg)
 
 column_selector(data::ChildDataFrame, arg::Union{Tuple,Array})::Array{Int8,1} = 
-    cols(data, arg...)
+    colmask(data, arg...)
 
 column_selector(data::ChildDataFrame, arg::Union{Array{Bool,1},BitArray{1},Array{T,1} where T<:Integer}) = 
     column_selector(parent(data), arg)
@@ -182,12 +185,6 @@ function column_selector(data::ChildDataFrame, arg::Function)::Array{Int8,1}
         if error isa MethodError; return column_selector(parent(data), arg); end
     end
 end
-
-
-
-
-# Create a union type for all available column selectors    
-ColumnSelector = Union{method_types(column_selector, [AbstractDataFrame], 2)...}
 
 
 
@@ -246,19 +243,19 @@ cols(args...) =
     cols(args)
 
 cols(s::Tuple; kwargs...) = 
-	ColumnPredicateFunction(data::AnyDataFrame -> cols(data, s))
+    ColumnPredicateFunction(data::AnyDataFrame -> cols(data, s))
 
 cols(data::AnyDataFrame, args...; kwargs...) = 
     cols(data, args)
 
 cols(data::AnyDataFrame, f::Function; kwargs...) = 
-	cols(data, column_selector(data, f))
+    cols(data, column_selector(data, f))
 
 cols(data::AnyDataFrame, f::ColumnPredicateFunction; kwargs...) =
-	cols(data, f(data; kwargs...))
+    cols(data, f(data; kwargs...))
 
 cols(data::AnyDataFrame, f::typeof(all); kwargs...) =
-	cols(data, (f,))
+    cols(data, (f,))
 
 cols(data::AnyDataFrame, s; kwargs...) = 
     cols(data, (s,))
@@ -286,6 +283,13 @@ function cols(data::AnyDataFrame, s::Tuple)
 
         selection = min.(max.(selection .+ pred, 0), 1)
     end
-    convert(Array{Bool,1}, selection)
+    ColumnMask(convert(Array{Bool,1}, selection))
 end
+
+
+
+"""
+Return underlying column mask of ColumnMask object returned from cols
+"""
+colmask(d::AnyDataFrame, args...; kwargs...) = cols(d, args...; kwargs...).mask
 

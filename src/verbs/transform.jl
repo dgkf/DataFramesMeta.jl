@@ -150,10 +150,6 @@ julia> df |> @transform(at => Number, x -> x .* 2)
 │ 3   │ 6     │ 'c'  │ 2     │
 ```
 """
-function transform(args...; kwargs...)
-	partial_verb(transform, args...; kwargs...)
-end
-
 function transform(data::AbstractDataFrame, args...; kwargs...)
 	transform!(copy(data), args...; kwargs...)
 end
@@ -169,10 +165,6 @@ end
 
 
 @doc (@doc transform) 
-function transform!(args...; kwargs...)
-	partial_verb(transform!, args...; kwargs...)
-end
-
 function transform!(data::AnyDataFrame, predicate::AnyColumnPredicate,
         x::Function; kwargs...)
     transform_!(data, predicate, x; kwargs...)
@@ -201,7 +193,7 @@ function transform_!(d::AnyDataFrame, predicate::AnyColumnPredicate,
 		x::Function; _namefunc::Function=default_naming_func, kwargs...)
 
     _namefunc = expecting_data(_namefunc) ? _namefunc(d) : _namefunc
-	col_syms = names(d)[cols(d, predicate)]
+	col_syms = names(d)[colmask(d, predicate)]
     dyn_cols = Symbol.(_namefunc(c,k) 
 		for c=string.(col_syms), k=string.(keys(kwargs)))
 
@@ -227,15 +219,15 @@ function transform_!(g::GroupedDataFrame, predicate::AnyColumnPredicate,
 		x::Function; _namefunc::Function=default_naming_func, kwargs...)
 
     _namefunc = expecting_data(_namefunc) ? _namefunc(g) : _namefunc
-	col_syms = names(g)[cols(d, predicate)]
+    col_syms = names(g)[colmask(d, predicate)]
     dyn_cols = Symbol.(_namefunc(c,k) 
-		for c=string.(col_syms), k=string.(keys(kwargs)))
+        for c=string.(col_syms), k=string.(keys(kwargs)))
 
     @assert(!any(in(names(g)).(dyn_cols)), 
         "new column names will overwrite existing columns")
     
-    @assert((x === nothing || !any(in(groupvars(g)).(cols))) && 
-			!any(in(groupvars(g)).(dyn_cols)),
+    @assert((x === nothing || !any(in(groupvars(g)).(col_syms))) && 
+	    !any(in(groupvars(g)).(dyn_cols)),
         "transform is attempting to modify a grouping variable. " *
         "To affect grouping variables you must first ungroup.")
 
@@ -285,7 +277,7 @@ transform_handler!(g::GroupedDataFrame, col::Symbol, into::Symbol, x) =
 
 
 function transform_macro_helper(args...; inplace::Bool=false)
-	f = inplace ? transform! : transform
+    f = inplace ? gen(transform!) : gen(transform)
 	args = verb_arg_handler(args; key=false)
 	:($f($(args...)))
 end

@@ -2,12 +2,10 @@ export orderby, orderby!, @orderby, @orderby!
 
 
 
-orderby(args...; kwargs...) = partial_verb(orderby, args...; kwargs...)
 orderby(data::AnyDataFrame, args...) = orderby_!(copy(data), args...)
 orderby(g::GroupedDataFrame, args...) =
     groupby(orderby_!(copy(parent(g)), args...), g.cols)
 
-orderby!(args...; kwargs...) = partial_verb(orderby!, args...; kwargs...)
 orderby!(data::AnyDataFrame, args...) = orderby_!(data::AnyDataFrame, args...)
 orderby!(g::GroupedDataFrame, args...) =
     groupby(orderby_!(parent(g), args...), g.cols)
@@ -29,9 +27,9 @@ orderby_handler(data, x::AbstractArray) = x
 
 
 function orderby_helper(args...; inplace::Bool=false)
-	f = inplace ? orderby! : orderby
+    f = inplace ? gen(orderby!) : gen(orderby)
 	args = verb_arg_handler(args, at_predicate=false, key=false, 
-			predicate_pairs=false)
+            predicate_pairs=false)
 	:($f($(args...)))
 end
 

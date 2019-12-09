@@ -284,10 +284,6 @@ julia> DataFramesMeta.aggregate(df, :at => all(), maximum, second = x -> x[2])
 │ 1   │ 26        │ 2        │ 'z'       │ 'b'      │ 1         │ 0        │
 ```
 """
-function aggregate(args...; kwargs...)
-	partial_verb(aggregate, args...; kwargs...)
-end
-
 function aggregate(d::AbstractDataFrame; kwargs...)
     _aggregate(d; kwargs...)
 end
@@ -355,10 +351,6 @@ end
 
 
 # aggregate_wide Function
-function aggregate_wide(args...; kwargs...)
-    data -> aggregate_wide(data, args...; kwargs...)
-end
-
 # aggregate_wide AnyDataFrame
 function aggregate_wide(d::AnyDataFrame, key::Symbol, args...; kwargs...)
     aggregate_wide(d, args...; _colkey = key, kwargs...)
@@ -413,10 +405,6 @@ end
 
 
 # aggregate_long Function
-function aggregate_long(args...; kwargs...)
-    data -> aggregate_long(data, args...; kwargs...)
-end
-
 # aggregate_long AnyDataFrame
 function aggregate_long(d::AnyDataFrame, key::Symbol, args...; kwargs...)
 	aggregate_long(d, args...; _key = key, kwargs...)
@@ -476,17 +464,17 @@ function _aggregate(d::AnyDataFrame; kwargs...)
     DataFrame([k => transform_handler(d,k,k,v) for (k,v)=kwargs]...)
 end
 
-function _aggregate(d, pred::Pred, args...; kwargs...)
+function _aggregate(d, pred::AnyColumnPredicate, args...; kwargs...)
     args, kwargs, _ = provide_expected_data(d, args, kwargs)
     __aggregate(d, pred, args...; kwargs...)
 end
 
-function _aggregate(d::AnyDataFrame, cols::Pred, key::Symbol, 
+function _aggregate(d::AnyDataFrame, pred::AnyColumnPredicate, key::Symbol, 
         args...; kwargs...)
-    __aggregate(d, cols, args...; _key=key, kwargs...)
+    __aggregate(d, pred, args...; _key=key, kwargs...)
 end
 
-function __aggregate(d::AnyDataFrame, cols::Pred, args...; 
+function __aggregate(d::AnyDataFrame, pred::AnyColumnPredicate, args...; 
         _namefunc::Function=default_naming_func, 
         _makeunique::Bool=false,
         _key::Union{Symbol,Missing}=missing,
@@ -495,7 +483,7 @@ function __aggregate(d::AnyDataFrame, cols::Pred, args...;
     @assert(length(args) + length(kwargs) > 0, 
         "an aggregating function must be provided.")    
         
-    pred_f_pairs = [cols => f for f in [args..., kwargs...]]
+    pred_f_pairs = [colmask(d, pred) => f for f in [args..., kwargs...]]
     if _colkey !== missing
         _aggregate_wide(d, 
             pred_f_pairs; 
@@ -518,10 +506,9 @@ function __aggregate_helper(d, predicate_function_pairs::Array{<:Pair})
     # produce list of affecting functions
     # create mask of affected columns per function
     f_cols_pairs = vcat(map(predicate_function_pairs) do (pred,fs)
-        col_mask = cols(d, pred)
-		fs isa Union{Tuple,Array} ? [f => col_mask for f in fs] : 
-        fs isa NamedTuple ? [p => col_mask for p in pairs(fs)] :
-        fs => col_mask
+		fs isa Union{Tuple,Array} ? [f => pred for f in fs] : 
+        fs isa NamedTuple ? [p => pred for p in pairs(fs)] :
+        fs => pred
     end...)
 
     affected_cols_idx = (|).(getindex.(f_cols_pairs, 2)...)
@@ -545,12 +532,12 @@ end
 
 function __aggregate_wide(d, predicate_function_pairs::Array{<:Pair}; 
         _colkey::Symbol=:column, _makeunique::Bool=false)
-    results, cols = __aggregate_helper(d, predicate_function_pairs)
+    results, pred = __aggregate_helper(d, predicate_function_pairs)
 	if !any_affected_cols(predicate_function_pairs)
 		return(DataFrame(_colkey => [], results..., makeunique = _makeunique))
 	end
 
-    DataFrame(_colkey => cols, results..., makeunique = _makeunique)
+    DataFrame(_colkey => pred, results..., makeunique = _makeunique)
 end
 
 function _aggregate_long(d, args...; kwargs...)
@@ -560,14 +547,14 @@ end
 
 function __aggregate_long(d, predicate_function_pairs::Array{<:Pair}; 
         _key::Symbol=:aggregate, _makeunique::Bool=false)
-    results, cols = __aggregate_helper(d, predicate_function_pairs)
+    results, pred = __aggregate_helper(d, predicate_function_pairs)
 	if !any_affected_cols(predicate_function_pairs)
 		return(DataFrame(_key => getfield.(results, :first)))
 	end
 
     df = hcat(
         DataFrame(vcat(reshape.(getfield.(results, :second), 1, :)...), 
-            cols, 
+            pred, 
             makeunique=_makeunique),
         DataFrame(_key => getfield.(results, :first)),
         makeunique = _makeunique)
@@ -623,7 +610,7 @@ end
 
 
 function aggregate_macro_helper(f_inplace, f, args...; inplace::Bool=false)
-    f = inplace ? f_inplace : f
+    f = inplace ? gen(f_inplace) : gen(f)
 	args = verb_arg_handler(args)
 	:($f($(args...)))
 end
