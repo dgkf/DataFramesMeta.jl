@@ -1,7 +1,6 @@
 export column_selector, cols
 
-protect_bool_array(x) = (x,)
-protect_bool_array(x::Union{Array{Bool,1},BitArray{1}}) = (x,)
+import Base.show
 
 # Predicate DataTypes
 struct ColumnPredicateFunction <: Function
@@ -21,6 +20,10 @@ end
 
 struct ColumnMask{T<:Bool} <: AbstractArray{T,1}
     mask::AbstractArray{T,1}
+end
+function Base.show(io::IO, ::MIME"text/plain", x::ColumnMask{<:Bool})
+    print("ColumnMask ")
+    show(x.mask)
 end
 
 AnyColumnPredicate = Union{ColumnMask,ColumnPredicateFunction}
@@ -161,7 +164,9 @@ function column_selector(data::AbstractDataFrame, arg::Array{T,1} where T<:Integ
         @assert(maximum(sign.(arg)) - minimum(sign.(arg)) <= 1,
             "column indices for selection should be either all negative or " *
             "all positive, but not both.")
-        all(arg .< 0) ? -in(-arg).(1:length(names(data))) .- 1 : in(arg).(1:length(names(data)))
+        all(arg .< 0) ? 
+            -in(-arg).(1:length(names(data))) .- 1 : 
+            in(arg).(1:length(names(data)))
     else # column mask
         @assert(length(arg) == length(names(data)), 
             "column selection by Array{Int} must have length equal to the " *
@@ -176,11 +181,13 @@ column_selector(data::ChildDataFrame, arg) =
 column_selector(data::ChildDataFrame, arg::Union{Tuple,Array})::Array{Int8,1} = 
     colmask(data, arg...)
 
-column_selector(data::ChildDataFrame, arg::Union{Array{Bool,1},BitArray{1},Array{T,1} where T<:Integer}) = 
+column_selector(data::ChildDataFrame,
+        arg::Union{Array{Bool,1},BitArray{1},Array{T,1} where T<:Integer}) = 
     column_selector(parent(data), arg)
 
 function column_selector(data::ChildDataFrame, arg::Function)::Array{Int8,1}
-    try column_selector(data, arg(data))  # for group-specific funcs, e.g. groupvars
+    # for group-specific funcs, e.g. groupvars
+    try column_selector(data, arg(data)) 
     catch error
         if error isa MethodError; return column_selector(parent(data), arg); end
     end
@@ -274,7 +281,8 @@ function cols(data::AnyDataFrame, s::Tuple)
         pred = column_selector(data, selector_i)
         
         @assert(maximum(sign.(pred)) - minimum(sign.(pred)) <= 1,
-            "selectors must either add or remove selected columns, but cannot do both.")
+            "selectors must either add or remove selected columns, but " * 
+            "cannot do both.")
 
         # handle case where 1st argument is removal (assume initial select all)
         if i == 1 && minimum(pred) < 0; selection .= 2

@@ -3,7 +3,7 @@ export case_when, case_when_with
 import Base.Broadcast.broadcasted
 
 """
-    case_when(pred, x, rest...)
+    case_when(pred => x, rest...)
 
 `case_when` allows a case to be selected dependent on the first `true` case. 
 Functionally, this is identical to nesting ifelse functions to build `elseif` 
@@ -12,7 +12,7 @@ fallthrough case will return `nothing`.
 
 ### Arguments
 
-* `case` : a Bool passed to `ifelse`
+* `pred` : a Bool passed to `ifelse`
 * `x` : the value returned when `pred` is `true`
 * `rest...` : the first argument will be the value returned when `pred` is 
     false. If two or more additional arguments are provided they can be 
@@ -31,20 +31,21 @@ fallthrough case will return `nothing`.
 ```jldoctest
 julia> using DataFramesMeta
 
-julia> case_when(false, 1, false, 2, true, 3, false, 4)
+julia> case_when(
+    false => 1, 
+    false => 2, 
+    true  => 3, 
+    false => 4)
 
-julia> case_when.(
-    [false, false, false, true ], 1,
-    [false, true,  false, false], 2,
-    true, 3)
+julia> case_when(
+    [false, false, false, true ] => 1,
+    [false, true,  false, false] => 2,
+    true                         => 3)
 ```
 """
-function case_when(cases...)
-	if length(cases) > 0
-		ifelse.(cases[1].first, cases[1].second, case_when(cases[2:end]...))
-	else
-		missing
-	end
+function case_when(cases::Pair...)
+    if length(cases) <= 0; return missing; end
+    ifelse.(cases[1].first, cases[1].second, case_when(cases[2:end]...))
 end
 
 
@@ -58,7 +59,7 @@ cww_pred(v, pred::Regex) = match.(pred, v) .!== nothing
 cww_pred(v, pred) = v == pred
 
 """
-    case_when_with(v, pred, x, rest...)
+    case_when_with(v, pred => x, rest...)
 
 An analog to `case_when` where each case clause is interpreted as a predicate 
 upon the initial value, `v`
@@ -66,14 +67,17 @@ upon the initial value, `v`
 ### Arguments
 
 * `v` : A value to evaluate `pred` upon for determining cases
+
 * `pred` : A predicate value, which is attempted to be smartly interpretted to
     handle most case-style predicate criteria. This includes:
-        * `pred::Function` : `pred` is evaluated upon `v`
+        * `pred::Function` : `pred` is evaluated upon `v` (`pred(v)`)
         * `pred::Bool` : `pred` is used as case directly
-        * `pred::Union{Array,Tuple}` : evaluate whether `v` is in `pred`
-        * `pred::Type` : evaluate whether `v` is a subtype of `pred`
-        * `pred::Any` : interpretted for equivalence of `v` against `pred`
+        * `pred::Union{Array,Tuple}` : evaluate whether `v in pred`
+        * `pred::Type` : evaluate whether `v <: pred`
+        * `pred::Any` : interpretted as `v == pred`
+
 * `x` : value if resolved `pred` is `true`
+
 * `rest...` : recycled as consecutive `pred` and `x`. If any argument remains, 
     it is used as a fallthrough case.
 
@@ -96,12 +100,10 @@ julia> case_when_with(1:10,
 ```
 """
 function case_when_with(v, cases::Pair...)
-	if length(cases) > 0
-		ifelse.(
-			cww_pred.(v, cases[1].first), 
-			cases[1].second, case_when_with(v, cases[2:end]...))
-	else
-		missing
-	end
+    if length(cases) <= 0; return missing; end
+    ifelse.(
+        cww_pred.(v, cases[1].first), 
+        cases[1].second, 
+        case_when_with(v, cases[2:end]...))
 end
 

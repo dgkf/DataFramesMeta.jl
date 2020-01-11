@@ -22,15 +22,15 @@ function orderby_!(data::AnyDataFrame, args...)
 end
 
 orderby_handler(data::AnyDataFrame, x::Function) = orderby_handler(data, x(data))
+orderby_handler(data::AnyDataFrame, x::SymbolContext) = orderby_handler(data, x(data))
 orderby_handler(data, x::AbstractArray) = x
 
 
 
 function orderby_helper(args...; inplace::Bool=false)
     f = inplace ? gen(orderby!) : gen(orderby)
-	args = verb_arg_handler(args, at_predicate=false, key=false, 
-            predicate_pairs=false)
-	:($f($(args...)))
+    args = verb_arg_handler(args, at_predicate=false, key=false, predicate_pairs=false)
+    :($f($(args...)))
 end
 
 macro orderby(args...)

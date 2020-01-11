@@ -11,6 +11,14 @@ function doc_see_also(f, fs)
 end
 
 
+
+"Replace single newline characters with a space."
+replace_single_newlines(str) = replace(replace(str,
+    r"([^\s\n])\n([^\s\n])" => s"\1 \2"), 
+    r"\n+$" => s"")
+
+
+
 doc_verb_arg_data() = replace_single_newlines("""
 Any `DataFrame`-like object (including any `AbstractDataFrame`,
 `DataFrameRows` or `GroupedDataFrame`), or a Function. If a function is

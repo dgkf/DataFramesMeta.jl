@@ -1,27 +1,33 @@
 import Base.all, Base.any, Base.Broadcast.broadcasted
 
-
+is_columnwise_op(f) = nameof(f) == :columnwise_op
 
 # this function feels overly recursive, can probably be improved by separating
 # conversion to a common Bool array mask from the reduction of bool masks 
 # instead of reducing every leaf of a tree.
 
 function columnwise_comparison(data::AnyDataFrame, fs::Function...; op=&)
-	vals = (expecting_data(f) ? f(data) : f(col) for col=eachcol(data), f=fs)
-	columnwise_comparison(vals...; op=op)
+    vals = (is_columnwise_op(f) ? f(data) : f(col) for col=eachcol(data), f=fs)
+    columnwise_comparison(vals...; op=op)
 end
 
-function columnwise_comparison(df::AnyDataFrame, pfs::Pair{<:Any,<:Function}...; op=&)
-	vals = (columnwise_comparison(accessor(df, cols(df, p)), f; op=op) for (p,f)=pfs)
-	columnwise_comparison(vals...; op=op)
+function columnwise_comparison(data::AnyDataFrame, pfs::Pair{<:Any,<:Function}...; op=&)
+    vals = (columnwise_comparison(sym(data, colmask(data, p)), f; op=op) for (p,f)=pfs)
+    columnwise_comparison(vals...; op=op)
 end
 
 function columnwise_comparison(args::Function...; op=&)
-	x::AnyDataFrame -> columnwise_comparison(x, args...; op=op)
+    function columnwise_op(x)
+        columnwise_comparison(x, args...; op=op)
+    end
+    columnwise_op
 end
 
 function columnwise_comparison(args::Pair{<:Any,<:Function}...; op=&)
-	x::AnyDataFrame -> columnwise_comparison(x, args...; op=op)
+    function columnwise_op(x)
+        columnwise_comparison(x, args...; op=op)
+    end
+    columnwise_op
 end
 
 function columnwise_comparison(bs...; op=&)
@@ -57,7 +63,9 @@ end
 
 Return a column selection function which will select all available columns.
 """
-all() = df::AnyDataFrame -> convert(Array{Int8,1}, repeat([2], length(names(df))))
+function all()
+    x::AnyDataFrame -> convert(Array{Int8,1}, repeat([2], length(names(x))))
+end
 
 
 
@@ -97,13 +105,15 @@ julia> all(x -> x .> 1, x -> x .<= 3)(df)
  0
 ```
 """
-# all(fs::Function...) = x -> all(f(x) for f=fs)
 all(fs::Function...) = columnwise_comparison(fs...; op=&)
 all(df::AnyDataFrame) = all(all.(eachcol(df)))
 
 function all(pfs::Union{<:Function,Pair{<:Any,<:Function}}...)
-	pfs = (typeof(f)<:Function ? true => f : f for f=pfs)
-	data::AnyDataFrame -> columnwise_comparison(data, pfs...; op=&)
+    pfs = (typeof(f)<:Function ? true => f : f for f=pfs)
+    function columnwise_op(x)
+        columnwise_comparison(x, pfs...; op=&)
+    end
+    columnwise_op
 end
 
 function broadcasted(t::typeof(all), fs::Function...) 
@@ -150,8 +160,11 @@ julia> any(x -> x .> 1, x -> x .<= 3)(df)
 any(df::AnyDataFrame) = any(any.(eachcol(df)))
 
 function any(pfs::Union{<:Function,Pair{<:Any,<:Function}}...)
-	pfs = (typeof(f)<:Function ? true => f : f for f=pfs)
-	data::AnyDataFrame -> columnwise_comparison(data, pfs...; op=|)
+    pfs = (typeof(f)<:Function ? true => f : f for f=pfs)
+    function columnwise_op(x)
+        columnwise_comparison(x, pfs...; op=|)
+    end
+    columnwise_op
 end
 
 function broadcasted(t::typeof(any), fs::Function...)

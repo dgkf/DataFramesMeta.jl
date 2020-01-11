@@ -151,15 +151,15 @@ julia> df |> @transform(at => Number, x -> x .* 2)
 ```
 """
 function transform(data::AbstractDataFrame, args...; kwargs...)
-	transform!(copy(data), args...; kwargs...)
+    transform!(copy(data), args...; kwargs...)
 end
 
 function transform(data::GroupedDataFrame, args...; kwargs...)
-	groupby(transform!(copy(parent(data)), args...; kwargs...), data.cols)
+    groupby(transform!(copy(parent(data)), args...; kwargs...), data.cols)
 end
 
 function transform(data::DataFrames.DataFrameRows, args...; kwargs...)
-	transform!(eachrow(copy(parent(data))), args...; kwargs...)
+    transform!(eachrow(copy(parent(data))), args...; kwargs...)
 end
 
 
@@ -170,17 +170,17 @@ function transform!(data::AnyDataFrame, predicate::AnyColumnPredicate,
     transform_!(data, predicate, x; kwargs...)
 end
 
-function transform!(data::AnyDataFrame, x::Function; kwargs...)
-	transform_!(data, cols(all), x; kwargs...)
+function transform!(data::AnyDataFrame, x::Union{Function,SymbolContext}; kwargs...)
+    transform_!(data, cols(all), x; kwargs...)
 end
 
 function transform!(data::AnyDataFrame, predicate::AnyColumnPredicate; 
-		kwargs...)
-	transform_!(data, predicate, identity; kwargs...)
+        kwargs...)
+    transform_!(data, predicate, identity; kwargs...)
 end
 
 function transform!(data::AnyDataFrame; kwargs...)
-	transform_!(data; kwargs...)
+    transform_!(data; kwargs...)
 end
 
 
@@ -190,12 +190,14 @@ end
 `transform_` operator, used by DataType-specific handlers
 """
 function transform_!(d::AnyDataFrame, predicate::AnyColumnPredicate,
-		x::Function; _namefunc::Function=default_naming_func, kwargs...)
+         x::Union{Function,SymbolContext}; 
+         _namefunc::Union{Function,SymbolContext}=default_naming_func, 
+         kwargs...)
 
-    _namefunc = expecting_data(_namefunc) ? _namefunc(d) : _namefunc
-	col_syms = names(d)[colmask(d, predicate)]
+    _namefunc = _namefunc isa SymbolContext ? _namefunc(d) : _namefunc
+    col_syms = names(d)[colmask(d, predicate)]
     dyn_cols = Symbol.(_namefunc(c,k) 
-		for c=string.(col_syms), k=string.(keys(kwargs)))
+                for c=string.(col_syms), k=string.(keys(kwargs)))
 
     @assert(!any(in(names(d)).(dyn_cols)), 
         "new column names will overwrite existing columns")
@@ -216,9 +218,11 @@ function transform_!(d::AnyDataFrame, predicate::AnyColumnPredicate,
 end
 
 function transform_!(g::GroupedDataFrame, predicate::AnyColumnPredicate, 
-		x::Function; _namefunc::Function=default_naming_func, kwargs...)
+         x::Union{Function,SymbolContext}; 
+         _namefunc::Union{Function,SymbolContext}=default_naming_func, 
+         kwargs...)
 
-    _namefunc = expecting_data(_namefunc) ? _namefunc(g) : _namefunc
+    _namefunc = _namefunc isa SymbolContext ? _namefunc(g) : _namefunc
     col_syms = names(g)[colmask(d, predicate)]
     dyn_cols = Symbol.(_namefunc(c,k) 
         for c=string.(col_syms), k=string.(keys(kwargs)))
@@ -227,7 +231,7 @@ function transform_!(g::GroupedDataFrame, predicate::AnyColumnPredicate,
         "new column names will overwrite existing columns")
     
     @assert((x === nothing || !any(in(groupvars(g)).(col_syms))) && 
-	    !any(in(groupvars(g)).(dyn_cols)),
+            !any(in(groupvars(g)).(dyn_cols)),
         "transform is attempting to modify a grouping variable. " *
         "To affect grouping variables you must first ungroup.")
 
@@ -253,11 +257,16 @@ end
 
 
 
-transform_handler(a::AnyDataFrame, col::Symbol, into::Symbol, x) = x
+transform_handler(a::AbstractDataFrame, col::Symbol, into::Symbol, x) = 
+    x
 transform_handler(a::AbstractDataFrame, col::Symbol, into::Symbol, x::Function) = 
-    transform_handler(a, col, into, expecting_data(x) ? x(a) : x(a[!,col]))
-transform_handler(a::DataFrames.DataFrameRows, col::Symbol, into::Symbol, x::Function) = 
-    transform_handler(parent(a), col, into, expecting_data(x) ? x.(a) : x.(a[col]))
+    transform_handler(a, col, into, x(a[!,col]))
+transform_handler(a::AbstractDataFrame, col::Symbol, into::Symbol, x::SymbolContext) = 
+    transform_handler(a, col, into, x(a))
+transform_handler(a::DataFrames.DataFrameRows, col, into, x::Function) =
+    transform_handler(parent(a), col, into, x.(a[col]))
+transform_handler(a::DataFrames.DataFrameRows, col, into, x::SymbolContext) =
+    transform_handler(parent(a), col, into, x.(a))
 function transform_handler(g::GroupedDataFrame, col::Symbol, into::Symbol, x)
     permute!(reduce(vcat, map(zip(g, g.starts, g.ends)) do (gi, s, e)
         out = transform_handler(gi, col, into, x)
@@ -265,21 +274,27 @@ function transform_handler(g::GroupedDataFrame, col::Symbol, into::Symbol, x)
     end), g.idx)
 end
 
+
+
 transform_handler!(a::AbstractDataFrame, col::Symbol, into::Symbol, x) = 
     a[!,into] .= x
 transform_handler!(a::AbstractDataFrame, col::Symbol, into::Symbol, x::Function) = 
-    transform_handler!(a, col, into, expecting_data(x) ? x(a) : x(a[!,col]))
+    transform_handler!(a, col, into, x(a[!,col]))
+transform_handler!(a::AbstractDataFrame, col::Symbol, into::Symbol, x::SymbolContext) = 
+    transform_handler!(a, col, into, x(a))
 transform_handler!(a::DataFrames.DataFrameRows, col, into, x::Function) =
-    transform_handler!(parent(a), col, into, expecting_data(x) ? x.(a) : x.(a[col]))
+    transform_handler!(parent(a), col, into, x.(a[col]))
+transform_handler!(a::DataFrames.DataFrameRows, col, into, x::SymbolContext) =
+    transform_handler!(parent(a), col, into, x.(a))
 transform_handler!(g::GroupedDataFrame, col::Symbol, into::Symbol, x) = 
-    g.parent[!,into] = transform_handler(g, col, into, x)
+    g.parent[!,into] = transform_handler(gi, col, into, x)
 
 
 
 function transform_macro_helper(args...; inplace::Bool=false)
     f = inplace ? gen(transform!) : gen(transform)
-	args = verb_arg_handler(args; key=false)
-	:($f($(args...)))
+        args = verb_arg_handler(args; key=false)
+        :($f($(args...)))
 end
 
 @doc (@doc transform) 

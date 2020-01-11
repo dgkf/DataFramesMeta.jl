@@ -11,7 +11,9 @@ AnyDataFrame = Union{
 
 
 
-"A default naming function for aggregation columns"
+"""
+A default naming function for aggregation columns
+"""
 default_naming_func(column_name, keyword) = column_name * "_" * keyword
 
 
@@ -40,6 +42,27 @@ function spoken_list(list::AbstractArray, qchar::String="")
     s = string.(list)
     seps = reverse([i == 1 ? " and " : ", " for (i, si) in enumerate(s[2:end])])
     qchar * s[1] * qchar * string((seps .*  qchar .* s[2:end] .* qchar)...)
+end
+
+
+
+"""
+Test for whether a function can accept a DataFrame-like object
+"""
+accepts_data(f, type::Type=AnyDataFrame) = 
+    any([m.sig<:Tuple{Any,T} where T<:type for m=methods(f)])
+
+
+
+"""
+Tests for whether a function is explicitly expecting a DataFrame-like object
+"""
+expecting_data(f, type::Type=AnyDataFrame) = false
+expecting_data(f::Function, type::Type=AnyDataFrame) = 
+    startswith(string(nameof(f)), "#") && accepts_data(f, type)
+function expecting_data(args...; kwargs...)
+    [[expecting_data(a) for a=args]..., 
+     [expecting_data(v) for (k,v)=kwargs]...]
 end
 
 
@@ -74,145 +97,47 @@ match_arg(arg::Expr, pat::Expr) =
 
 
 """
-    match_args(args, patterns)
+    verb_arg_handler(args; at_predicate, key, predicate_pairs, 
+            args_symbol_context, kwargs_symbol_context)
 
-Match a series of arguments against a series of argument patterns
+A handler for processing DataFramesMeta verbs
 
-Patterns can either be Types or expressions. `_` is used as a wildcard for
-pattern matching.
+### Arguments
+
+* args: The arguments to a DataFramesMeta verb macro
+* at_predicate: Set to `true` if the verb handler should process predicate 
+    `at => _` syntax, modifying code to instead read `cols(_)`
+* key: Set to `true` if a column key should be accepted following a predicate,
+    leaving the key argument untouched if it is a symbol. 
+* predicate_pairs: Set to `true` if predicate pairs of the form `_ => _` should
+    be allowed, producing `cols(_) => _` pairs.
+* args_symbol_context: Set to `true` if additional arguments should be
+    interpretted as a symbol context.
+* kwargs_symbol_context: Set to `true` if additional keyworded arguments should
+    be interpretted as a symbol context.
 """
-function match_args(args, pattern)
-    length(args) == 0 && return (repeat([()], length(pattern)+1)..., 0)
-    matches = repeat([0], length(args))
-    pattern_l = length(pattern)
-    pattern_i = 1
-    for (i, a) in enumerate(args)
-        if length(pattern) == 0
-            break
-        elseif match_arg(a, pattern[1])
-            popfirst!(pattern)
-            matches[i] = pattern_i
-            pattern_i += 1
-        end
-    end
-    
-    matched = (args[matches .== i] for i=[1:pattern_l...,0])
-    (matched..., pattern_l - length(pattern))
-end
-
-
-
-"Split macro arguments into positional and keyword arguments"
-function split_macro_args(args)
-    args = [a isa Expr && a.head == :parameters ? a.args : [a] for a in args]
-    args = reduce(vcat, args)
-    has_kw = [a isa Expr && a.head in (:kw, :(=)) for a in args]
-    args[(!).(has_kw)], args[has_kw]
-end
-
-
-
-"Convert a pair specified as `at => _` into `:at => _`"
-function at_pair_to_symbol(args)
-    is_pair = [match_arg(arg, Pair) for arg in args]
-    args = map(zip(args, is_pair)) do (arg, is_arg_pair)
-        is_arg_pair && arg.args[2] == :at ? pair_name_to_symbol(arg) : arg
-    end
-end
-
-
-
-"Convert a pair specified as `at => _` into `cols(_)`"
-function at_pair_to_cols(args)
-    is_pair = [match_arg(arg, Pair) for arg in args]
-    args = map(zip(args, is_pair)) do (arg, is_arg_pair)
-		is_arg_pair && arg.args[2] == :at ? 
-		Expr(:call, :(=>), :(:at), Expr(:call, :cols, arg.args[3])) : 
-		arg
-    end
-end
-
-
-
-"Convert a QuoteNode to a Symbol in a Pair (`thing => _` becomes `:thing => _`)"
-function pair_name_to_symbol(pair_expr)
-    if (!(typeof(pair_expr.args[2])<:QuoteNode))
-        pair_expr.args[2] = Meta.quot(pair_expr.args[2])
-    end
-    pair_expr
-end
-
-
-
 function verb_arg_handler(args; at_predicate=true, key=true, 
-			predicate_pairs=true, args_symbol_context=true, 
-			kwargs_symbol_context=true)
-	following_at_pred = true
-	map(enumerate(args)) do (i, arg)
-		if arg isa Expr && arg.head == :macrocall
-			return(arg)
-		elseif at_predicate && match_arg(arg, :(at => _))
-			following_at_pred = true
-			return(Expr(:call, :cols, arg.args[3]))
-		elseif predicate_pairs && match_arg(arg, :(_ => _))
-			arg.args[2] = Expr(:call, :cols, arg.args[2])
-		elseif key && following_at_pred && match_arg(arg, Symbol)
-		elseif kwargs_symbol_context && arg isa Expr && arg.head in (:kw, :(=))
-			arg = Expr(:kw, arg.args[1], symbol_context(arg.args[2]))
-		elseif args_symbol_context
-        	arg = symbol_context(arg)
-		end
-		following_at_pred = false
-		arg
-	end
-end
+	predicate_pairs=true, args_symbol_context=true, 
+	kwargs_symbol_context=true)
 
-
-
-"Split Pair arguments out from a list of arguments"
-function split_pairs(args)
-    is_pair = [match_arg(arg, Pair) for arg in args]
-    args[is_pair], args[(!).(is_pair)]
-end
-
-
-
-"""
-Split argument into arguments before the first pair, the first pair and 
-arguments after the first pair
-"""
-function split_on_pair(args)
-    is_pair = [match_arg(arg, Pair) for arg in args]
-    args = map(zip(args, is_pair)) do (arg, is_arg_pair)
-        is_arg_pair ? pair_name_to_symbol(arg) : arg
-    end
-
-    first_pair = findfirst(is_pair)
-    last_pair = findlast(is_pair)
-
-    if first_pair == last_pair == nothing 
-        args, (), ()
-    else
-        args[1:first_pair-1], args[first_pair:last_pair], args[last_pair+1:end]
-    end
-end
-
-
-
-"Get a list of types that are acceptable for a given generic"
-function method_types(f::Function, sig::AbstractArray, param::Number)
-    [skipmissing(map(methods(f)) do m
-        match_sig = all(a<:b for (a,b)=zip(m.sig.parameters[2:min(length(sig),end)], sig))
-        if match_sig && length(m.sig.parameters) > param
-            m.sig.parameters[param+1]
-        else
-            missing
+    following_at_pred = true
+    map(enumerate(args)) do (i, arg)
+        if arg isa Expr && arg.head == :macrocall
+            return(arg)
+        elseif at_predicate && match_arg(arg, :(at => _))
+            following_at_pred = true
+            return(Expr(:call, :cols, arg.args[3]))
+        elseif predicate_pairs && match_arg(arg, :(_ => _))
+            arg.args[2] = Expr(:call, :cols, arg.args[2])
+        elseif key && following_at_pred && match_arg(arg, Symbol)
+        elseif kwargs_symbol_context && arg isa Expr && arg.head in (:kw, :(=))
+            arg = Expr(:kw, arg.args[1], syms(arg.args[2]))
+        elseif args_symbol_context
+            arg = syms(arg)
         end
-    end)...]
+        following_at_pred = false
+        arg
+    end
 end
 
 
-"Replace single newline characters with a space."
-replace_single_newlines(str) = replace(replace(str,
-    r"([^\s\n])\n([^\s\n])" => s"\1 \2"), 
-    r"\n+$" => s"")

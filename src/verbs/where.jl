@@ -167,7 +167,7 @@ function where(data::GroupedDataFrame, args...; kwargs...)
 end
 
 function where(data::GroupedDataFrame, predicate::AnyColumnPredicate, args...)
-	groupby(where!(copy(parent(data)), predicate, args...), data.cols)
+    groupby(where!(copy(parent(data)), predicate, args...), data.cols)
 end
 
 function where(data::DataFrames.DataFrameRows, args...; kwargs...)
@@ -198,9 +198,9 @@ function _where!(d::AnyDataFrame, predicate::AnyColumnPredicate, args...)
 end
 
 function _where!(d::AnyDataFrame, predicate_pairs::Array{<:ColumnPredicatedPair})
-    i = (!).(reduce((l,r) -> l .& r, map(predicate_pairs) do (pred, arg)
+    i = .! reduce((l,r) -> l .& r, map(predicate_pairs) do (pred, arg)
         where_handler(d, colmask(d, pred), arg)
-    end))
+    end)
 
     if length(i) == 1 (if i[1] deleterows!(d, 1:nrow(d)) end)
     else deleterows!(d, i)
@@ -214,14 +214,22 @@ where_handler(d, col_mask, x) = x
 where_handler(d::DataFrames.DataFrameRows, col_mask, n::Nothing) = true
 
 function where_handler(d, col_mask, f::Function)
-    if expecting_data(f); where_handler(d, col_mask, f(d[!,col_mask]))
+    if is_columnwise_op(f); where_handler(d, col_mask, f(d[!,col_mask]))
     else; where_handler(d, missing, mapcols(f, d[!,col_mask]))
     end
 end
 
-function where_handler(d::DataFrames.DataFrameRows, col_mask, 
-        f::Function)
-	cell_results = (expecting_data(f) ? f(d) : f).([r[c] for r=d, c=col_mask])
+function where_handler(d, col_mask, f::SymbolContext)
+    where_handler(d, col_mask, f(d[!,col_mask]))
+end
+
+function where_handler(d::DataFrames.DataFrameRows, col_mask, f::Function)
+    cell_results = (is_columnwise_op(f) ? f(d) : f).([r[c] for r=d, c=col_mask])
+    where_handler(d, col_mask, cell_results)
+end
+
+function where_handler(d::DataFrames.DataFrameRows, col_mask, f::SymbolContext)
+    cell_results = f(d).([r[c] for r=d, c=col_mask])
     where_handler(d, col_mask, cell_results)
 end
 
