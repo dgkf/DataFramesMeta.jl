@@ -1,10 +1,19 @@
-import Base.startswith, Base.endswith, Base.occursin, Base.(-), Base.(:)
+import Base.startswith, Base.endswith, Base.occursin, Base.(-), Base.(:), 
+       Base.show
+
+struct UnitRange{T<:Symbol} <: AbstractUnitRange{T}
+    start::T
+    stop::T
+end
+Base.show(io::IO, ::MIME"text/plain", x::UnitRange{<:Symbol}) = 
+    println("(:" * string(x.start) * " : :" * string(x.stop), ")")
+(:)(start::Symbol, stop::Symbol) = UnitRange(start, stop)
 
 # extend some generics so that they can be partially evaluated to produce 
 # selector functions or valid selector inputs
 
 function startswith(b::AbstractString)
-    df::AnyDataFrame -> startswith(df, b)
+    x -> startswith(x, b)
 end
 
 function startswith(data::AnyDataFrame, b::AbstractString) 
@@ -12,7 +21,7 @@ function startswith(data::AnyDataFrame, b::AbstractString)
 end
 
 function endswith(b::AbstractString)
-    df::AnyDataFrame -> endswith(df, b)
+    x -> endswith(x, b)
 end
 
 function endswith(data::AnyDataFrame, b::AbstractString)
@@ -20,7 +29,7 @@ function endswith(data::AnyDataFrame, b::AbstractString)
 end
 
 function occursin(b::AbstractString)
-    df::AnyDataFrame -> occursin(df, b)
+    x -> occursin(x, b)
 end
 
 function occursin(data::AnyDataFrame, b::AbstractString)
@@ -28,15 +37,15 @@ function occursin(data::AnyDataFrame, b::AbstractString)
 end
 
 function (-)(y::Union{AbstractString,AbstractArray{<:AbstractString}})
-    df::AnyDataFrame -> df - y
+    x -> x - y
 end
 
 function (-)(y::Union{Symbol,AbstractArray{<:Symbol}})
-    df::AnyDataFrame -> df - y
+    x -> x - y
 end
 
 function (-)(f::Function)
-    df::AnyDataFrame -> -(f(df))
+    x -> -(f(x))
 end
 
 function (-)(t::typeof(all))
@@ -44,19 +53,14 @@ function (-)(t::typeof(all))
 end
 
 function (-)(data::AnyDataFrame, y::AbstractArray{<:Symbol})::Array{Int8,1}
-    -in(y).(names(data)) .- 1
+    -in(y).(names(data))
 end
 
 function (-)(data::AnyDataFrame, y::AbstractArray{<:AbstractString})::Array{Int8,1}
-    -in(y).(string.(names(data))) .- 1
+    -in(y).(string.(names(data)))
 end
 
 function (-)(data::AnyDataFrame, y::Union{AbstractString,Symbol})::Array{Int8,1}
     data - [y]
 end
-
-function (:)(a::Symbol, b::Symbol)
-    df::AnyDataFrame -> findfirst(a .== names(df)):findlast(b .== names(df))
-end
-
 

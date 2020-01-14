@@ -140,7 +140,10 @@ column_selector(data::AbstractDataFrame, arg::Symbol)::Array{Int8,1} =
 column_selector(data::AbstractDataFrame, arg::AbstractString)::Array{Int8,1} = 
     in([arg]).(string.(names(data)))
 
-column_selector(data::AbstractDataFrame, arg::UnitRange)::Array{Int8,1} = 
+column_selector(data::AbstractDataFrame, arg::UnitRange{<:Symbol})::Array{Int8,1} =
+    column_selector(data, [findfirst(arg.start .== names(data)):findlast(arg.stop .== names(data))...])
+
+column_selector(data::AbstractDataFrame, arg::UnitRange{<:Real})::Array{Int8,1} = 
     column_selector(data, [arg...])
 
 column_selector(data::AbstractDataFrame, arg::DataType)::Array{Int8,1} = 
@@ -150,7 +153,7 @@ column_selector(data::AbstractDataFrame, arg::Regex)::Array{Int8,1} =
     match.(arg, string.(names(data))) .!= nothing
 
 column_selector(data::AbstractDataFrame, arg::Function)::Array{Int8,1} = 
-    column_selector(data, accepts_data(arg) ? arg(data) : arg.(eachcol(data)))
+    column_selector(data, arg(data))
 
 function column_selector(data::AbstractDataFrame, arg::Union{Array{Bool,1},BitArray{1}})::Array{Int8,1}
     @assert(length(arg) == length(names(data)),
@@ -196,7 +199,7 @@ end
 
 
 """
-	cols(data, args...)
+    cols(data, args...)
 
 `selectors` can be used to create an `Array{Bool,1}` selection mask with 
 length equal to the number of columns in `data` indicating whether to 
@@ -269,9 +272,7 @@ cols(data::AnyDataFrame, s; kwargs...) =
 
 function cols(data::AnyDataFrame, s::Tuple)
     ncol_data = length(names(data))
-    if ncol_data < 1 
-        return(Array{Bool,1}[]) 
-    end
+    if ncol_data < 1; return(Array{Bool,1}[]); end
 
     selection = repeat([0], ncol_data)
     for (i, selector_i) in enumerate(s)
@@ -279,14 +280,14 @@ function cols(data::AnyDataFrame, s::Tuple)
         # run twice, such that any user function which returns a type that 
         # can be handled gets converted to preferred output
         pred = column_selector(data, selector_i)
-        
+
         @assert(maximum(sign.(pred)) - minimum(sign.(pred)) <= 1,
             "selectors must either add or remove selected columns, but " * 
             "cannot do both.")
 
         # handle case where 1st argument is removal (assume initial select all)
-        if i == 1 && minimum(pred) < 0; selection .= 2
-        elseif maximum(abs.(pred)) > 1; pred = pred .-= sign.(pred)
+        if i == 1 && minimum(pred) < 0; selection .= 1
+        elseif maximum(abs.(pred)) > 1; pred .-= sign.(pred)
         end
 
         selection = min.(max.(selection .+ pred, 0), 1)
