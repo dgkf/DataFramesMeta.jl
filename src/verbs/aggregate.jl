@@ -239,7 +239,7 @@ prone if applied to the same predicated columns.
 julia> df |> @aggregate(:summary,  
     all()  => (col_type = typeof, cell_type = eltype,),
     Number => (maximum, minimum),
-    Char   => (n_unique = x -> reduce(*, x),))  
+    Char   => (n_unique = length ∘ unique,))  
 5×4 DataFrame
 │ Row │ summary   │ x              │ y              │ z             │
 │     │ Symbol    │ Any            │ Any            │ Any           │
@@ -289,27 +289,31 @@ function aggregate(d::AbstractDataFrame; kwargs...)
 end
 
 function aggregate(d::AbstractDataFrame, x::Union{Function,SymbolContext})
-    _aggregate(d, cols(d, true), x; _namefunc = (c,k) -> c)
+    _aggregate(d, colmask(d, true), x; _namefunc = (c,k) -> c)
 end
 
 function aggregate(d::AbstractDataFrame, args...; kwargs...)
-    _aggregate(d, cols(d, true), args...; kwargs...)
+    _aggregate(d, colmask(d, true), args...; kwargs...)
 end
 
 function aggregate(d::AbstractDataFrame, predicate::AnyColumnPredicate, args...; 
         kwargs...)
-    col_mask = cols(d, predicate)
-    _aggregate(d, col_mask, args...; kwargs...)
+    _aggregate(d, colmask(d, predicate), args...; kwargs...)
 end
 
-function aggregate(d::AbstractDataFrame, predicate::AnyColumnPredicate, key::Symbol, 
-        args...; kwargs...)
-    col_mask = cols(d, predicate)
-    aggregate(d, col_mask, args...; _key=key, kwargs...)
+function aggregate(d::AbstractDataFrame, predicate::AnyColumnPredicate,
+        key::Symbol, args...; kwargs...)
+    aggregate(d, colmask(d, predicate), args...; _key=key, kwargs...)
+end
+
+function aggregate(d::AbstractDataFrame, key::Symbol, 
+        args::ColumnPredicatedPair...; kwargs...)
+    args = map(args) do (a,b); colmask(d, a) => (expecting_data(b) ? b(d) : b); end
+    _aggregate_long(d, [args...]; kwargs...)
 end
 
 function aggregate(d::AbstractDataFrame, args::ColumnPredicatedPair...; kwargs...)
-    args = map(args) do (a,b); cols(d, a) => (expecting_data(b) ? b(d) : b); end
+    args = map(args) do (a,b); colmask(d, a) => (expecting_data(b) ? b(d) : b); end
     _aggregate_flat(d, [args...]; kwargs...)
 end
 
@@ -319,7 +323,7 @@ function aggregate(g::GroupedDataFrame; kwargs...)
 end
 
 function aggregate(g::GroupedDataFrame, args...; kwargs...)
-    predicate = cols(g, true)
+    predicate = colmask(g, true)
     f = length(args) == 1 ? (c,k) -> c : default_naming_func
     map(g) do gi; aggregate(gi, predicate, args...; _namefunc = f, kwargs...); end
 end
@@ -327,7 +331,7 @@ end
 function aggregate(g::GroupedDataFrame, arg::ColumnPredicatedPair, 
         args::ColumnPredicatedPair...; kwargs...)
     args = (arg, args...)
-    args = map(args) do (a,b); cols(g, a) => (expecting_data(b) ? b(g) : b); end
+    args = map(args) do (a,b); colmask(g, a) => (expecting_data(b) ? b(g) : b); end
     map(g) do gi; aggregate(gi, [args...]; kwargs...); end
 end
 
@@ -337,7 +341,7 @@ end
 
 function aggregate(g::GroupedDataFrame, predicate::AnyColumnPredicate, 
         args...; kwargs...)
-    col_mask = cols(g, predicate)
+    col_mask = colmask(g, predicate)
     map(g) do gi; aggregate(gi, col_mask, args...; kwargs...); end
 end
 
@@ -355,7 +359,7 @@ function aggregate_wide(d::AnyDataFrame, key::Symbol, args...; kwargs...)
 end
 
 function aggregate_wide(d::AnyDataFrame, args...; kwargs...)
-    aggregate(d, cols(d, true), args...; _colkey=:column, kwargs...)
+    aggregate(d, colmask(d, true), args...; _colkey=:column, kwargs...)
 end
 
 # aggregate_wide AbstractDataFrame
@@ -375,19 +379,19 @@ function aggregate_wide(d::AbstractDataFrame, key::Symbol,
 end
 
 function aggregate_wide(d::AbstractDataFrame, args::ColumnPredicatedPair...; kwargs...) 
-	args = map(args) do (a,b); cols(d, a) => (expecting_data(b) ? b(d) : b); end
+    args = map(args) do (a,b); colmask(d, a) => (expecting_data(b) ? b(d) : b); end
     _aggregate_wide(d, [args...]; kwargs...)
 end 
 
 # aggregate_wide GroupedDataFrame
 function aggregate_wide(g::GroupedDataFrame, predicate::AnyColumnPredicate, args...; 
         kwargs...)
-    col_mask = cols(g, predicate, incl_groups=false)
+    col_mask = colmask(g, predicate, incl_groups=false)
     map(g) do gi; aggregate_wide(gi, col_mask, args...; kwargs...); end
 end
 
 function aggregate_wide(g::GroupedDataFrame, args::ColumnPredicatedPair...; kwargs...)
-    args = map(args) do (a,b); cols(g, a, incl_groups=false) => b; end
+    args = map(args) do (a,b); colmask(g, a, incl_groups=false) => b; end
     map(g) do gi; aggregate_wide(gi, args...; kwargs...); end
 end
 
@@ -409,22 +413,23 @@ function aggregate_long(d::AnyDataFrame, key::Symbol, args...; kwargs...)
 end
 
 function aggregate_long(d::AnyDataFrame, args...; kwargs...)
-    aggregate_long(d, cols(d, true), args...; _key = :aggregate, kwargs...)
+    col_mask = colmask(d, true)
+    aggregate_long(d, col_mask, args...; _key = :aggregate, kwargs...)
 end
 
 # aggregate_long AbstractDataFrame
 function aggregate_long(d::AbstractDataFrame, predicate::AnyColumnPredicate, 
         args...; kwargs...)
-    aggregate(d, cols(d, predicate), args...; _key = :aggregate, kwargs...)
+    aggregate(d, colmask(d, predicate), args...; _key = :aggregate, kwargs...)
 end
 
 function aggregate_long(d::AbstractDataFrame, predicate::AnyColumnPredicate, 
         key::Symbol, args...; kwargs...)
-    aggregate(d, cols(d, predicate), args...; _key = key, kwargs...)
+    aggregate(d, colmask(d, predicate), args...; _key = key, kwargs...)
 end
 
 function aggregate_long(d::AbstractDataFrame, args::ColumnPredicatedPair...; kwargs...) 
-    args = map(args) do (a,b); cols(d, a) => (expecting_data(b) ? b(d) : b); end
+    args = map(args) do (a,b); colmask(d, a) => (expecting_data(b) ? b(d) : b); end
     _aggregate_long(d, [args...]; kwargs...)
 end 
 
@@ -436,7 +441,7 @@ function aggregate_long(g::GroupedDataFrame, predicate::AnyColumnPredicate, args
 end
 
 function aggregate_long(g::GroupedDataFrame, args::ColumnPredicatedPair...; kwargs...)
-    args = map(args) do (a,b); cols(g, a, incl_groups=false) => b; end
+    args = map(args) do (a,b); colmask(g, a, incl_groups=false) => b; end
     map(g) do gi; aggregate_long(gi, args...; kwargs...); end
 end
 
@@ -504,7 +509,7 @@ end
 function __aggregate_helper(d, predicate_function_pairs::Array{<:Pair})
     # produce list of affecting functions
     # create mask of affected columns per function
-    f_cols_pairs = vcat(map(predicate_function_pairs) do (pred,fs)
+    f_cols_pairs = vcat(map(predicate_function_pairs) do (pred, fs)
         fs isa Union{Tuple,Array} ? [f => pred for f in fs] : 
         fs isa NamedTuple ? [p => pred for p in pairs(fs)] :
         fs => pred
@@ -568,6 +573,7 @@ end
 function __aggregate_flat(d, predicate_function_pairs::Array{<:Pair};
         _namefunc::Union{Function,SymbolContext,Missing}=default_naming_func, 
         _makeunique::Bool=false)
+
     if !any_affected_cols(predicate_function_pairs); return(DataFrame()); end
     _namefunc = _namefunc === missing ? default_naming_func : _namefunc
     results, col_syms = __aggregate_helper(d, predicate_function_pairs)

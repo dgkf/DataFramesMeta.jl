@@ -21,9 +21,9 @@ end
 struct ColumnMask{T<:Bool} <: AbstractArray{T,1}
     mask::AbstractArray{T,1}
 end
-function Base.show(io::IO, ::MIME"text/plain", x::ColumnMask{<:Bool})
+function Base.show(io::IO, m::MIME"text/plain", x::ColumnMask{<:Bool})
     print("ColumnMask ")
-    show(x.mask)
+    show(io, m, x.mask)
 end
 
 AnyColumnPredicate = Union{ColumnMask,ColumnPredicateFunction}
@@ -50,7 +50,7 @@ from a selection.
    - `UnitRange` : select columns between two columns by name
    - `DataType` : select all columns of a given DataType
    - `Regex` : select columns by regex match of column names
-   - `Array{Bool,1}` or `BitArray{1}`: select columns by Bool mask
+   - `Array{Bool,1}` or `BitArray{1}` : select columns by Bool mask
    - `Array{Int,1}` : select columns by array of indices, or by integer 
      selection (+1), or removal (0 or -1)
    - `Tuple` or `Array` : Other `Tuple` or `Array` arguments are unpacked and 
