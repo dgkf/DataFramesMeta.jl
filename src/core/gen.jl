@@ -9,7 +9,13 @@ pipeable functions.
 """
 function gen(f::Function)
     function(args...; kwargs...) 
-        x -> f(x, args...; kwargs...) 
+        x -> composeable_unary_verb(x, f, args...; kwargs...)
     end
 end
+
+composeable_unary_verb(obj, f, args...; kwargs...) = 
+    f(obj, args...; kwargs...)
+
+composeable_unary_verb(func::Function, f, args...; kwargs...) = 
+    x -> composeable_unary_verb(func(x), f, args...; kwargs...)
 
