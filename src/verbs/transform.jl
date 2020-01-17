@@ -166,15 +166,16 @@ end
 
 @doc (@doc transform) 
 function transform!(data::AnyDataFrame, predicate::AnyColumnPredicate,
-        x::Function; kwargs...)
+        x::Union{Function,SymbolContext}; kwargs...)
     transform_!(data, predicate, x; kwargs...)
 end
 
-function transform!(data::AnyDataFrame, x::Union{Function,SymbolContext}; kwargs...)
-    transform_!(data, cols(all), x; kwargs...)
+function transform!(data::AnyDataFrame, x::Union{Function,SymbolContext}; 
+        kwargs...)
+    transform_!(data, cols(data, true), x; kwargs...)
 end
 
-function transform!(data::AnyDataFrame, predicate::AnyColumnPredicate; 
+function transform_at!(data::AnyDataFrame, predicate::AnyColumnPredicate; 
         kwargs...)
     transform_!(data, predicate, identity; kwargs...)
 end

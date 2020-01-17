@@ -126,7 +126,7 @@ function verb_arg_handler(args; at_predicate=true, key=true,
             return(arg)
         elseif at_predicate && match_arg(arg, :(at => _))
             following_at_pred = true
-            return(Expr(:call, :cols, arg.args[3]))
+            return(:(cols($(arg.args[3]))))
         elseif predicate_pairs && match_arg(arg, :(_ => _))
             arg.args[2] = Expr(:call, :cols, arg.args[2])
         elseif key && following_at_pred && match_arg(arg, Symbol)

@@ -11,12 +11,59 @@ The syntax added was chosen as a balance between cognitive burden of the
 `DataFramesMeta` function footprint and versatility of the core data manipulation
 verbs.
 
-## Feature Overview
+## Design Goals and Open Considerations
+
+A number of design decisions have been explored. Naturally, there are arguments
+for or against all of them and each API decision comes at a tradeoff among
+multiple goals. All critique and input is welcome!
+
+- Consistency and ubiquity
+  - `Symbols` as references to columns, using `SymbolContexts.jl`
+    >(almost) all macros transform expressions with `Symbol`s to a
+    >`SymbolContext` object, a specialized `Function` that handles evaluation
+    >of `Symbol`s within the context of an arbitrary data object.
+    >
+    >```julia
+    ># macro calls with symbols ...
+    >df |> @transform(z = :x .+ :y)
+    >
+    ># ... are functionally equivalent to
+    >transform(df, z = @syms :x .+ :y)
+    >```
+
+  - Column selections handled via `cols()` calls, generating a `ColumnMask`
+    object. 
+    >Any macros with column selection are handled by transforming expressions
+    >to calls to `cols()`, which interprets a number of input `Type`s as
+    >selectors, returning a `ColumnMask`
+    > 
+    >```julia
+    ># macro calls with a column selection predicate such as 
+    >df |> @transform(at => Number, x -> x .* 2)
+    >
+    ># are functionally equivalent to
+    >transform(df, cols(Number), x -> x .* 2)
+    >```
+
+    >**Note**
+    >The `at => ` syntax was chosen as a way of using the method dispatch
+    >system to differentiate between predicated and non-predicated verb usage.
+    >This is certainly a design that warrants scrutiny and could just as easily
+    >use the `cols()` calls directly or be broken out as separate, more 
+    >type-stable functions such as `transform_at` and `transform_if`.
+    
+- Native composability with `|>` and `∘` by returning unary functions 
+- Flexibility of function inputs to "do the right thing". Most notably, this
+  means that named arguments generally create a column of that name, and
+  unnamed arguments are general manipulations applied to all columns.
+- 
+
+## Features
 
 ### 1. Data Manipulations as Function Factories
 
-All manipulation macros (e.g. `@transform`, etc) return a unary function,
-allowing for native compatibility with the julia `|>` operator. 
+All manipulation macros (`@transform`, etc) return a unary function, allowing
+for native compatibility with the julia `|>` operator. 
 
 ```julia
 df |> @transform(x = :y)
@@ -36,15 +83,38 @@ This reframing of these data steps is fundamental to the rewrite, and has a
 number of benefits in julia. First, as each function takes only a single
 argument, the expected `DataFrame`, the functions can now be natively piped
 with `|>`. Since there's no longer reliance on the `@linq` macro, extending
-DataFramesMeta with additional data manipulations is more intuitive. More
-importantly, each function can be individually precompiled and reused.
+DataFramesMeta with additional data manipulations is more intuitive. In typical
+julia fashion, each function can be individually precompiled and reused.
 
-### 2. Flexible column selection
+
+### 2. API Consistency
+
+One of the core goals of the rewrite was to make the most frequently used syntax 
+of data manipulation intuitive, and the complicated edge cases possible. Already
+`DataFramesMeta` does a very good job of being transparent about its processing
+and balancing that against functionality. Specifically with the consistency and
+versatility of `Symbols` to refer to column names, `DataFramesMeta` has set a
+strong precedent for how to manipulate data.
+
+To extend this intuition, a number of additional features have been generalized
+across the entire package, allowing for use of common paradigms with consistent
+function call formatting.
+
+- Consistent column selection spanning a wide range of possible input data
+  types and usages. Most directly, this includes use in `select()`, but is used 
+  widely to predicate transformations. 
+- To improve the consistency and ubiquity in which symbols are handled
+  throughout the package, a new package, `SymbolContexts.jl`, was broken out to
+  allow symbolic expressions to be easily evaluated in the context of new
+  `DataTypes`.
+
+#### 2.1. Flexible Column Selection
 
 With the hope of accommodating a wealth of intuitive mechanisms of describing
-column selections, the `cols()` function has been redefined as a generic way
-of producing a `Array{Bool}` mask of selected columns. This common denominator
-of column-wise selection is used ubuitously throughout `DataFramesMeta`, allowing
+column selections, the `cols()` function has been redefined as a generic way of
+producing a `Array{Bool,1}` mask of selected columns (behind a thin
+`ColumnMask` `DataType` for easier dispatch). This common denominator of
+column-wise selection is used ubuitously throughout `DataFramesMeta`, allowing
 for the same mechanisms of column selection to be reused as a common paradigm
 throughout the package. 
 
@@ -90,7 +160,7 @@ intuitive manner:
 df |> @select(-all, :c : :e, Number, r"(d|e|f)", -:e, [13, 14], -endswith("z")) 
 ```
 
-### 3. Predicated Manipulations
+#### 2.1.1 General Predicated Manipulations
 
 These same column selections are also used to predicate inputs to all of the
 data manipulation macros. These predicated or subsetted calls have analogs
@@ -98,13 +168,20 @@ in `dplyr`. For example, `dplyr`'s `mutate` has analog function calls,
 `mutate_at`, `mutate_if`, and `mutate_all`. 
 
 For all `DataFramesMeta` data manipulation macros, these modes of subsetting
-affected columns is done through an `at => ` pair. 
+affected columns is done through an `at => ` pair, which is used by the
+corresponding macro to disambiguate between expressions that may otherwise be
+transforming expressions.
 
 For example, to apply a transformation function to all columns, 
 
 ```julia
 # analog to dplyr's `mutate_all`
 df |> @transform(at => all, x -> x .* 2)
+```
+
+> This call to `@transform` is functionally equivalent to the macro-less
+```
+transform(df, cols(all), x -> x .* 2)
 ```
 
 Any valid column selection can be used, allowing for analogs to `dplyr`'s 
@@ -117,8 +194,14 @@ df |> @transform(at => (:x, :y), x -> x .* 2)
 
 ```julia
 # analog to dplyr's `mutate_if`
-df |> @transform(at => col -> maximum(col) > 3, x -> .* 2)
+df |> @transform(at => mapcols(x -> maximum(x) > 3), x -> x .* 2)
 ```
+
+>Here `mapcols` is used to create a partially applied function which will accept
+the anticipated `DataFrame` to compute which columns get selected. It's open for
+debate whether `if => ` predicates should also be added to accommodate 
+column-wise predicate functions, which would simply convert expressions to 
+calls to `mapcols` automatically.  
 
 This `at => ` syntax is used to differentiate the predicate argument from 
 other keyworded arguments, as is recognized by the `DataFramesMeta` macro 
@@ -128,7 +211,7 @@ This syntactic sugar is used currently by `@transform`, `@where` and
 `@aggregate`, and could be extended to be used as well by `@select`, `@orderby`
 and `@groupby` although there were not considered prioirties for this behavior.
 
-### 4. `@where` predicated column collapsing
+#### 2.1.2 `@where` Predicated Column Collapsing
 
 The predicated form of `@where` becomes involved because it also necessitates
 that logic for collapsing across the predicated columns be described such that a
@@ -140,15 +223,16 @@ To make that more concrete, if `@where` is called with a predicate:
 df |> @where(at => Number, x -> x .> 2)
 ```
 
-it is ambiguous whether rows are to be kept if all or any values are greater
-than 2. Taking inspiration from `dplyr`'s `filter_at` symantics, the `all_vars`
-and `any_vars` functions are used to define this logic. 
+it is ambiguous whether rows are to be kept if *all* values are greater than 2,
+or if *any* values are greater than 2. Taking inspiration from `dplyr`'s
+`filter_at` symantics, the `all_vars` and `any_vars` functions are used to
+define this logic. 
 
 ```R
 mtcars %>% filter_if(is.numeric, any_vars(. > 300))
 ```
 
-Given julia's more rigorous dispatch, we can instead define methods for `all`
+Given julia's richer dispatch mechanisms, we can instead define methods for `all`
 and `any` which accept an arbitrary number of functions and require that the
 condition is met for *all* or *any* of the records, allowing us to define
 quite involved selection criteria with fairly natural symantics. 
@@ -166,7 +250,7 @@ how logic can be defined.
 ```julia
 # select all rows where any value in a Number column is >10 and all Number
 # column values are >2
-df |> @where(at => Number, all(x -> x .> 2, any(x -> x .> 10)) 
+df |> @where(at => Number, all(x -> x .> 2, any(x -> x .> 10)))
 ```
 
 Because not all logic will necessarily share the same predicate, `all` and
@@ -182,9 +266,38 @@ df |> @where(all(Number => x -> x .> 2, any(String => x -> startswith(x, "a"))))
 
 These symantics are flexible and compose to be able to represent quite
 complicated filtering criteria, and are founded on the same column selection
-behaviors itemized above.
+behaviors itemized above. 
 
-### 5. `@aggregate_long` and `@aggregate_wide`
+#### 3.1.3 `@aggregate` With Multiple Predicates
+
+The symantic notation of pairing a predicate column selection criteria with an
+applied function, as used in the last `@where` example is reused for
+aggregation. In addition to predicating aggregations using the `at => `
+predicate, predicate pairs can be used to define functions which are used for
+unique sets of column selections. 
+
+This syntax is quite involved and is intended to be a niche, but
+critical, use case where aggregating multiple times across incompatible pairs
+of predicate criteria and selections would necessitate that multiple copies
+of a `DataFrame` are created and aggregated to achieve a similar result. 
+
+```
+julia> df |> @aggregate_long(  
+    all()  => (col_type = typeof, cell_type = eltype,),
+    Number => (maximum, minimum),
+    Char   => (n_unique = x -> reduce(*, x),))  
+5×4 DataFrame
+│ Row │ aggregate │ x              │ y              │ z             │
+│     │ Symbol    │ Any            │ Any            │ Any           │
+├─────┼───────────┼────────────────┼────────────────┼───────────────┤
+│ 1   │ col_type  │ Array{Int64,1} │ Array{Int64,1} │ Array{Char,1} │
+│ 2   │ cell_type │ Int64          │ Int64          │ Char          │
+│ 3   │ maximum   │ 4              │ 2              │ missing       │
+│ 4   │ minimum   │ 1              │ 1              │ missing       │
+│ 5   │ n_unique  │ missing        │ missing        │ abcd          │
+```
+
+#### 3.1.3 `@aggregate_long` and `@aggregate_wide`
 
 My default, predicated `@aggregate` will behave similarly to `dplyr`'s
 `summarize_at`, creating a column for each affected column, for each
@@ -234,16 +347,8 @@ julia> df |> @aggregate_wide(at => all, maximum, minimum)
 In both cases, a `Symbol` can be passed immediately after the `at => `
 predicate to rename the `:agg` or `:column` default column names. 
 
-### 6. multiply predicated `@aggregate`
 
-In addition to predicating aggregations using the `at => ` predicate, predicate
-pairs can be used to define functions which are used for unique sets of column
-selections.
+## Closing
 
-```
-julia> df |> @aggregate_long(  
-    all()  => (col_type = typeof, cell_type = eltype,),
-    Number => (maximum, minimum),
-    Char   => (n_unique = x -> reduce(*, x),))  
-```
+
 

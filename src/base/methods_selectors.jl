@@ -1,3 +1,4 @@
+# Base extensions
 import Base.startswith, Base.endswith, Base.occursin, Base.(-), Base.(:), 
        Base.show
 
@@ -5,12 +6,11 @@ struct UnitRange{T<:Symbol} <: AbstractUnitRange{T}
     start::T
     stop::T
 end
+
 Base.show(io::IO, ::MIME"text/plain", x::UnitRange{<:Symbol}) = 
     println("(:" * string(x.start) * " : :" * string(x.stop), ")")
-(:)(start::Symbol, stop::Symbol) = UnitRange(start, stop)
 
-# extend some generics so that they can be partially evaluated to produce 
-# selector functions or valid selector inputs
+(:)(start::Symbol, stop::Symbol) = UnitRange(start, stop)
 
 function startswith(b::AbstractString)
     x -> startswith(x, b)

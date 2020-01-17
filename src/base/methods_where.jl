@@ -11,8 +11,12 @@ function columnwise_comparison(data::AnyDataFrame, fs::Function...; op=&)
     columnwise_comparison(vals...; op=op)
 end
 
-function columnwise_comparison(data::AnyDataFrame, pfs::Pair{<:Any,<:Function}...; op=&)
-    vals = (columnwise_comparison(sym(data, colmask(data, p)), f; op=op) for (p,f)=pfs)
+function columnwise_comparison(data::AnyDataFrame, pfs::Pair...; op=&)
+    vals = map(pfs) do (p,f)
+        col_mask = colmask(data, p)
+        if !any(col_mask); return(typeof(op) == typeof(&)); end
+        columnwise_comparison(sym(data, col_mask), f; op=op)
+    end
     columnwise_comparison(vals...; op=op)
 end
 
@@ -23,7 +27,7 @@ function columnwise_comparison(args::Function...; op=&)
     columnwise_op
 end
 
-function columnwise_comparison(args::Pair{<:Any,<:Function}...; op=&)
+function columnwise_comparison(args::Pair...; op=&)
     function columnwise_op(x)
         columnwise_comparison(x, args...; op=op)
     end
@@ -63,9 +67,7 @@ end
 
 Return a column selection function which will select all available columns.
 """
-function all()
-    x::AnyDataFrame -> convert(Array{Int8,1}, repeat([2], length(names(x))))
-end
+all() = x -> convert(Array{Int8,1}, repeat([2], length(names(x))))
 
 
 

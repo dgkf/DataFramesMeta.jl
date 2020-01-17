@@ -10,6 +10,8 @@ module DataFramesMeta
     end
     
     include_dir("utils")
+    include_dir("base")
+    include_dir("core")
     include_dir("verbs")
     include_dir("accessories")
 

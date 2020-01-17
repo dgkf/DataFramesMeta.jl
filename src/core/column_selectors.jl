@@ -1,6 +1,16 @@
 export column_selector, cols
 
 import Base.show
+import DataFrames.mapcols, DataFrames.convert
+
+# DataFrames extensions
+function mapcols(f::Function)
+    x -> mapcols(f, x)
+end
+
+function (-)(x::AnyDataFrame)
+    mapcols(col -> col .* -1, x)
+end
 
 # Predicate DataTypes
 struct ColumnPredicateFunction <: Function
@@ -11,9 +21,7 @@ function (pred::ColumnPredicateFunction)(x)
     pred.f(x)
 end
 
-function (pred::ColumnPredicateFunction)(
-        x::GroupedDataFrame; 
-        incl_groups::Bool=true)
+function (pred::ColumnPredicateFunction)(x::GroupedDataFrame; incl_groups::Bool=true)
     group_col_mask = (!in)(x.cols).(1:size(x.parent)[2])
     col_mask = pred.f(x).mask .& (incl_groups .| group_col_mask)
 end
@@ -21,6 +29,7 @@ end
 struct ColumnMask{T<:Bool} <: AbstractArray{T,1}
     mask::AbstractArray{T,1}
 end
+
 function Base.show(io::IO, m::MIME"text/plain", x::ColumnMask{<:Bool})
     print("ColumnMask ")
     show(io, m, x.mask)
@@ -153,7 +162,7 @@ column_selector(data::AbstractDataFrame, arg::Regex)::Array{Int8,1} =
     match.(arg, string.(names(data))) .!= nothing
 
 column_selector(data::AbstractDataFrame, arg::Function)::Array{Int8,1} = 
-    column_selector(data, arg(data))
+    column_selector(data, reshape(convert(Array, arg(data)), :))
 
 function column_selector(data::AbstractDataFrame, arg::Union{Array{Bool,1},BitArray{1}})::Array{Int8,1}
     @assert(length(arg) == length(names(data)),
