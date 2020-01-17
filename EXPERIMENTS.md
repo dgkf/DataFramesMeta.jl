@@ -10,7 +10,7 @@
 ## Motivation
 
 `DataFramesMeta` provides a wonderful interface for data manipulation that
-adopts a data transformation syntax to a pipeable syntactic shorthand for
+adapts a data transformation syntax to a pipeable syntactic shorthand for
 columnwise manipulations. 
 
 There are a few key areas where experiments have led to potentially productive
