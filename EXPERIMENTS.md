@@ -65,10 +65,23 @@ dataset. Only once parameterized do they fully articulate a function that is to
 be applied, and only then will they return a unary function ready to manipulate
 data.
 
+```julia
+julia> @transform(a = :b)
+#1 (generic function with 1 method)
+
+julia> @transform(a = :b)(DataFrame(b = 1:2))
+2×2 DataFrame
+│ Row │ b     │ a     │
+│     │ Int64 │ Int64 │
+├─────┼───────┼───────┤
+│ 1   │ 1     │ 1     │
+│ 2   │ 2     │ 2     │
+```
+
 From a user's perspective, this change is motivated by one key tradeoff,
-assuming that a pipeable syntax and the composition of transformations is more
-valuable than single transformations. The merits of this reprioritization
-certainly warrant further consideration.
+under the assumption that a pipeable syntax and the composition of 
+transformations is more valuable than single transformations, and assumes
+that the most common usage is with piped operations.
 
 ```julia
 # prioritized use cases:
@@ -85,7 +98,7 @@ In comparison to R's `dplyr` package, `DataFramesMeta.jl` takes the approach of
 using `Symbol`s to represent column names. This is a much appreciated stylistic
 change as it largely disambiguates how expressions are interpreted and minimizes
 conflicts with object names in the parent scope. The R ecosystem has adopted the
-non-standard evaluation principles advanced in `dplyr` with varying degrees of
+non-standard evaluation principles popularized in `dplyr` with varying degrees of
 robustness of implementation. In the worst cases, code which attempts to mimic
 the popularized `dplyr` syntax disregards many of `dplyr`'s considerations for
 things like scoped variables, nested expressions or alternative modes of column
@@ -93,7 +106,7 @@ specification.
 
 All of this is just to say that having easy to reuse code that allows a domain
 specific language to propegate is extremely valuable and encourages extension
-without duplication of effort.
+without duplication of effort or inconsistent reimplementation. 
 
 In the context of `DataFramesMeta`, this also would allow for expressions to 
 be interpretted to operate on non-`DataFrame` data structures with the same 
@@ -110,7 +123,7 @@ MetaGraph() |>
     density
 ```
 
-`SymbolContexts.jl` exposes only a single function that need to be implemented
+`SymbolContexts.jl` exposes only a single function that needs to be implemented
 for a new `DataType` to extend its symbolic syntax such that these expressions
 can be evaluated with the new `DataType`, namely `sym()` and optionally
 `syms_in_context()`.
@@ -134,6 +147,9 @@ df |> @transform(a = :x)
 
 # is functionally equivalent to 
 transform(df, a = @syms :x)
+
+# is functionally equivalent to
+transform(df, a = SymbolContext([:x], data -> sym(data, :x)))
 ```
 
 ### 3. Consistent Column Predicates
@@ -162,8 +178,8 @@ Using `cols()`, columns can be specified by
 - `Function`: applies function to the data, the result can be any of the types
   that can be interpretted by `cols()`, but most often is an `Array{Bool,1}`
 - `DataType`: adds columns with matching `DataType` to selection
-- `UnitRange`, `Tuple`, `Array`: adds elements to range based on
-  `cols(<element>)` result
+- `UnitRange{<:Real}`, `UnitRange{Symbol}`, `Tuple`, `Array`: adds elements 
+  to range based on `cols(<element>)` result
 
 In addition, a number of base functions and operators have been extended to 
 produce `Function`s when partially evaluated such that they can be easily used
@@ -173,11 +189,9 @@ with `cols()` selections.
   `cols()`-compatible functions when called with a single string argument,
   similar to the suggested curriable implementations suggested in
   [`JuliaLang/julia #33193`](https://github.com/JuliaLang/julia/issues/33193)
-- `(:)(a::Symbol, b::Symbol)`: defined such that a function is generated,
-  creating an `Integer` `UnitRange` between the index of the first symbol and
-  the index of the second symbol in the `DataFrame` names.
+- `(:)(a::Symbol, b::Symbol)`: defined such that a UnitRange{Symbol} is generated
 - `-`: Subtraction is extended to produce `cols()`-compatible functions when
-  called with a single string or symbol. Subtracting a function negates the
+  called with a single `String` or `Symbol`. Subtracting a function negates the
   result of the function, allowing extensive composition with other column
   selection functions.
 - `all` and `-all`: Uniquely handled such that all columns can be easily added
@@ -200,10 +214,11 @@ names `[:a, :b, :c]`, `select(-:a)` will return a `DataFrame` with columns
 
 ### 4. Predicated Columnwise Function Application
 
-One of the biggest gaps in `DataFramesMeta.jl` is the absence of convenient
-syntax for applying functions over many columns in a single operation. The same
-column selections used by `@select` are also used to predicate inputs to all of
-the data manipulation macros. These predicated or subsetted calls have analogs
+One of the biggest gaps in `DataFramesMeta.jl`, when compared to similar 
+packages like `dplyr` is the absence of convenient syntax for applying 
+functions over many columns in a single operation. The same column selections 
+used by `@select` are also used to predicate inputs to all of the data 
+manipulation macros. These predicated or subsetted calls have analogs
 in `dplyr`. For example, `dplyr`'s `mutate` has analog function calls,
 `mutate_at`, `mutate_if`, and `mutate_all`. 
 
@@ -244,10 +259,8 @@ predicate `at => all` as the first argument.
 ```julia
 # analog to dplyr's `mutate_all`
 df |> @transform(at => all, x -> x .* 2)
-```
 
-This call to `@transform` is functionally equivalent to the macro-less
-```
+# functionally equivalent to
 transform(df, cols(all), x -> x .* 2)
 ```
 
@@ -257,6 +270,9 @@ Any valid column selection can be used, allowing for analogs to `dplyr`'s
 ```julia
 # analog to dplyr's `mutate_at`
 df |> @transform(at => (:x, :y), x -> x .* 2)
+
+# functionally equivalent to
+transform(df, cols(:x, :y), x -> x .* 2)
 ```
 
 ```julia
@@ -268,7 +284,7 @@ df |> @transform(at => mapcols(x -> maximum(x) > 3), x -> x .* 2)
 >Here `mapcols` is used to create a partially applied function which will
 >accept the anticipated `DataFrame` to compute which columns get selected. A
 >parallel to `at => ` would be `if => `, which could implicitly wrap functions
->in `mapcols`. Unfortunately, a `if` in this context raises a syntax error,
+>in `mapcols`. Unfortunately, a `if` in this expression raises a syntax error,
 >preventing its use, and escalates concerns about the syntax itself.
 
 This syntactic sugar is used currently by `@transform`, `@where` and
@@ -290,9 +306,9 @@ df |>
 ```
 
 Because `@where` and `@aggregate` remove records, some mechanism of applying
-multiple predicates to different portions of their opertion is needed. These
-use cases are quite fringe but necessary to fully describe complicated
-filtering and aggregation steps.
+multiple predicates to different predicated column selections in a single 
+operation is needed. These use cases are quite fringe but necessary to fully 
+describe complicated filtering and aggregation steps.
 
 #### Predicated `@where`
 
@@ -374,7 +390,7 @@ julia> df |> @aggregate_long(
     Number => (maximum, minimum),
     Char   => (n_unique = length ∘ unique,))
 5×4 DataFrame
-│ Row │ aggregate │ x              │ y              │ z             │
+│ Row │ agg       │ x              │ y              │ z             │
 │     │ Symbol    │ Any            │ Any            │ Any           │
 ├─────┼───────────┼────────────────┼────────────────┼───────────────┤
 │ 1   │ col_type  │ Array{Int64,1} │ Array{Int64,1} │ Array{Char,1} │
