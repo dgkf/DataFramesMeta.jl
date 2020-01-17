@@ -225,11 +225,11 @@ transforming expressions.
 >special handling of the `cols()` function call to avoid transforming `:a` into
 >a `SymbolicContext`. 
 >
->Alternatives to the `at => ` pair syntax might include
->`@transform_at(Number, x -> x .* 2)`
->`@transform(@at(Number), x -> x .* 2)`
->`@transform(:at(Number), x -> x .* 2)`
->`@at(Number, @transform(x -> x .* 2))`
+>Alternatives to the `at => ` syntax might include  
+>`@transform_at(Number, x -> x .* 2)`  
+>`@transform(@at(Number), x -> x .* 2)`  
+>`@transform(:at(Number), x -> x .* 2)`  
+>`@at(Number, @transform(x -> x .* 2))`  
 
 For example, to apply a transformation function to all columns, simply
 providing a function to `transform` will default to applying it to all columns:
